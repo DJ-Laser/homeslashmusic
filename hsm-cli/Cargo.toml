@@ -1,0 +1,6 @@
+[package]
+name = "hsm-cli"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]

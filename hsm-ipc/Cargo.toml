@@ -1,0 +1,10 @@
+[package]
+name = "hsm-ipc"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+git-version.workspace = true
+rustix.workspace = true
+serde.workspace = true
+serde_json.workspace = true

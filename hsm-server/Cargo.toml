@@ -1,0 +1,10 @@
+[package]
+name = "hsm-server"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+hsm-ipc.workspace = true
+
+rodio.workspace = true
+smol.workspace = true
