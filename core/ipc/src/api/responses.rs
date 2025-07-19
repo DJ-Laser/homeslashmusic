@@ -6,4 +6,4 @@ pub struct Handled;
 
 /// The `hsm_ipc::version()` of the daemon.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Version(String);
+pub struct Version(pub String);

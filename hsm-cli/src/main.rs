@@ -1,3 +1,9 @@
+use hsm_ipc::requests;
+use ipc::send_request;
+
+mod ipc;
+
 fn main() {
-    println!("Hello, world!");
+  let reply = send_request(requests::Version).unwrap();
+  println!("{reply:?}");
 }
