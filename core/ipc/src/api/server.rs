@@ -12,7 +12,7 @@ pub(crate) mod private {
 }
 
 pub trait RequestHandler {
-  fn handle_version(&mut self, request: requests::Version) -> Reply<requests::Version>;
+  fn handle_version(&self, request: requests::Version) -> Reply<requests::Version>;
 }
 
 fn serialize_reply<R: client::Request>(reply: &Reply<R>) -> String {
@@ -28,7 +28,7 @@ pub fn serialize_error(error: String) -> String {
   reply_data
 }
 
-pub fn handle_request(request_data: &str, handler: &mut impl RequestHandler) -> String {
+pub fn handle_request(request_data: &str, handler: &impl RequestHandler) -> String {
   let request = match serde_json::from_str(request_data) {
     Ok(request) => request,
     Err(error) => {

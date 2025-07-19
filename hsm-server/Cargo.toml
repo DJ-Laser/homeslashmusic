@@ -8,3 +8,4 @@ hsm-ipc.workspace = true
 
 rodio.workspace = true
 smol.workspace = true
+ctrlc.workspace = true

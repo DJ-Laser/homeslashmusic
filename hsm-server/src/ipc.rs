@@ -1,44 +1,45 @@
-use std::{convert::Infallible, path::Path};
+use std::{convert::Infallible, fs, path::PathBuf};
 
 use hsm_ipc::{
   Reply, requests, responses,
   server::{RequestHandler, handle_request},
 };
 use smol::{
-  fs,
   io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader},
   net::unix::{UnixListener, UnixStream},
   stream::StreamExt,
 };
 
-pub async fn run_ipc_server() -> Result<Infallible, io::Error> {
-  let socket_path = Path::new(hsm_ipc::socket_path());
+pub struct IpcServer {
+  socket_path: PathBuf,
+}
 
-  if socket_path.exists() {
-    fs::remove_file(&socket_path).await.unwrap();
-  }
-
-  let listener = UnixListener::bind(socket_path)?;
-
-  while let Some(stream) = listener.incoming().next().await {
-    let res = if let Ok(stream) = stream {
-      StreamHandler.handle_stream(stream).await
-    } else {
-      stream.map(|_| ())
-    };
-
-    if let Err(error) = res {
-      eprintln!("failed to connect to ipc client: {}", error);
+impl IpcServer {
+  pub fn new() -> Self {
+    Self {
+      socket_path: PathBuf::from(hsm_ipc::socket_path()),
     }
   }
 
-  unreachable!("Iterating over `Incoming` should never return `None`")
-}
+  pub async fn run(&mut self) -> Result<Infallible, io::Error> {
+    let listener = UnixListener::bind(&self.socket_path)?;
 
-struct StreamHandler;
+    while let Some(stream) = listener.incoming().next().await {
+      let res = if let Ok(stream) = stream {
+        self.handle_stream(stream).await
+      } else {
+        stream.map(|_| ())
+      };
 
-impl StreamHandler {
-  async fn handle_stream(&mut self, stream: UnixStream) -> io::Result<()> {
+      if let Err(error) = res {
+        eprintln!("failed to connect to ipc client: {}", error);
+      }
+    }
+
+    unreachable!("Iterating over `Incoming` should never return `None`")
+  }
+
+  async fn handle_stream(&self, stream: UnixStream) -> io::Result<()> {
     let mut request_data = String::new();
     let mut stream_reader = BufReader::new(stream);
     stream_reader.read_line(&mut request_data).await?;
@@ -52,8 +53,15 @@ impl StreamHandler {
   }
 }
 
-impl RequestHandler for StreamHandler {
-  fn handle_version(&mut self, _: requests::Version) -> Reply<requests::Version> {
+impl RequestHandler for IpcServer {
+  fn handle_version(&self, _: requests::Version) -> Reply<requests::Version> {
     Ok(responses::Version(hsm_ipc::version()))
+  }
+}
+
+impl Drop for IpcServer {
+  fn drop(&mut self) {
+    fs::remove_file(&self.socket_path);
+    println!("Removing socket: `{:?}`", self.socket_path)
   }
 }

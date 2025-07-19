@@ -1,12 +1,22 @@
-use ipc::run_ipc_server;
+use ctrlc::CtrlCHandler;
+use ipc::IpcServer;
 
+mod ctrlc;
 mod ipc;
 
 fn main() {
+  let ex = smol::Executor::new();
+  let ctrlc = CtrlCHandler::init();
+
   let stream_handle =
     rodio::OutputStreamBuilder::open_default_stream().expect("Could not open default audio stream");
 
-  let ex = smol::Executor::new();
+  let channel = smol::channel::unbounded::<usize>();
 
-  smol::block_on(ex.run(async { run_ipc_server().await.unwrap() }));
+  let ipc_server = ex.spawn(async { IpcServer::new().run().await.unwrap() });
+
+  smol::block_on(ex.run(async {
+    ctrlc.wait_for_ctrlc().await;
+    ipc_server.cancel().await;
+  }));
 }
