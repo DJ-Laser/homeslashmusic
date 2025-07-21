@@ -1,7 +1,8 @@
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use audio_server::AudioServer;
 use ctrlc::CtrlCHandler;
+use futures_concurrency::future::Race;
 use ipc::IpcServer;
 use smol::Executor;
 
@@ -10,18 +11,20 @@ mod ctrlc;
 mod ipc;
 
 fn main() {
-  static EX: OnceLock<Arc<Executor>> = OnceLock::new();
-  EX.get_or_init(|| Arc::new(Executor::new()));
-
-  let ex: &'static Arc<Executor<'static>> = EX.get().unwrap();
-  let ctrlc = CtrlCHandler::init();
-
-  let ipc_server = ex.spawn(async { IpcServer::new(ex.clone()).run().await.unwrap() });
-  let audio_server = ex.spawn(async { AudioServer::init().run().await });
+  let ex: Arc<Executor<'static>> = Arc::new(Executor::new());
 
   smol::block_on(ex.run(async {
-    ctrlc.wait_for_ctrlc().await;
-    ipc_server.cancel().await;
-    audio_server.cancel().await;
+    let ctrlc = CtrlCHandler::init();
+
+    let mut ipc_server = IpcServer::new(ex.clone());
+    let mut audio_server = AudioServer::init();
+
+    (
+      async { ipc_server.run().await.unwrap() },
+      async { audio_server.run().await },
+      ctrlc.wait_for_ctrlc(),
+    )
+      .race()
+      .await;
   }));
 }
