@@ -15,7 +15,7 @@ impl AudioServer {
       .expect("Could not open default audio stream");
 
     Self {
-      player: Player::new(output_stream.mixer()),
+      player: Player::connect_new(output_stream.mixer()),
       output_stream,
     }
   }
