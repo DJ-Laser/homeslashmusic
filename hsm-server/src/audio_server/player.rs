@@ -6,34 +6,28 @@ use std::{
     Arc,
     atomic::{AtomicUsize, Ordering},
   },
-  time::Duration,
 };
 
-use atomic_enum::atomic_enum;
+use controlled_source::{SourceEvent, wrap_source};
 use rodio::{
   Decoder, Source,
   mixer::Mixer,
   queue::{SourcesQueueInput, SourcesQueueOutput, queue},
-  source,
 };
 use smol::{
   channel::{self, Receiver, Sender},
   lock::Mutex,
 };
 
-enum SourceEvent {
-  Finsihed,
-}
+use control_status::{AtomicLoopMode, AtomicPlaybackState};
+pub use control_status::{LoopMode, PlaybackState};
 
-#[atomic_enum]
-enum PlaybackState {
-  Playing,
-  Paused,
-  Stopped,
-}
+mod control_status;
+mod controlled_source;
 
 struct Controls {
   pub playback_state: AtomicPlaybackState,
+  pub loop_mode: AtomicLoopMode,
   pub to_skip: AtomicUsize,
   pub volume: Mutex<f32>,
 }
@@ -42,6 +36,7 @@ impl Controls {
   pub fn new() -> Self {
     Self {
       playback_state: AtomicPlaybackState::new(PlaybackState::Stopped),
+      loop_mode: AtomicLoopMode::new(LoopMode::Track),
       to_skip: AtomicUsize::new(0),
       volume: Mutex::new(1.0),
     }
@@ -56,8 +51,6 @@ pub struct Player {
 }
 
 impl Player {
-  const SOURCE_UPDATE_INTERVAL: Duration = Duration::from_millis(5);
-
   pub fn connect_new(mixer: &Mixer) -> Self {
     let (player, source) = Self::new();
     mixer.add(source);
@@ -79,40 +72,6 @@ impl Player {
     )
   }
 
-  fn wrap_source<S: Source + Send + 'static>(&self, source: S) -> impl Source + Send + 'static {
-    let controls = self.controls.clone();
-    let source_tx = self.source_tx.clone();
-
-    let source = source
-      .track_position()
-      .amplify(1.0)
-      .pausable(false)
-      .skippable()
-      .periodic_access(Self::SOURCE_UPDATE_INTERVAL, move |skippable| {
-        {
-          let to_skip = controls.to_skip.load(Ordering::Acquire);
-          if to_skip > 0 {
-            skippable.skip();
-            controls.to_skip.store(to_skip - 1, Ordering::Release);
-            return;
-          }
-        }
-        let pauseable = skippable.inner_mut();
-        pauseable.set_paused(matches!(
-          controls.playback_state.load(Ordering::Relaxed),
-          PlaybackState::Paused
-        ));
-        let volume_controlled = pauseable.inner_mut();
-        volume_controlled.set_factor(*controls.volume.lock_blocking());
-      });
-    source::from_iter([
-      Box::new(source) as Box<dyn Source + Send>,
-      Box::new(source::EmptyCallback::new(Box::new(move || {
-        source_tx.try_send(SourceEvent::Finsihed).unwrap();
-      }))) as Box<dyn Source + Send>,
-    ])
-  }
-
   async fn load_file<P: AsRef<Path>>(&self, path: P) -> Result<impl Source + 'static, io::Error> {
     let path = path.as_ref().to_owned();
     let (path, file, len) = smol::unblock(|| {
@@ -132,13 +91,17 @@ impl Player {
     }
 
     let decoder = builder.build().map_err(io::Error::other)?;
-    Ok(self.wrap_source(decoder))
+    Ok(wrap_source(
+      decoder,
+      self.controls.clone(),
+      self.source_tx.clone(),
+    ))
   }
 
   pub async fn run(&self) -> Result<(), io::Error> {
     let add_source = async || {
       let source = self
-        .load_file("/home/dj_laser/Music/ASGORE - trap remix w_ mythic apex.mp3")
+        .load_file("/home/dj_laser/Music/get out!.mp3")
         .await
         .unwrap();
       self.track_queue.append(source);
@@ -153,7 +116,8 @@ impl Player {
       };
 
       match event {
-        SourceEvent::Finsihed => add_source().await,
+        SourceEvent::LoopError(error) => eprintln!("Error looping source: {}", error),
+        _ => (),
       }
     }
   }
