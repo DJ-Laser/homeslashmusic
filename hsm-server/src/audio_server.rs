@@ -39,8 +39,8 @@ impl AudioServer {
 
       match message {
         Message::Playback(message) => match message {
-          PlaybackControl::Play => self.player.set_playing(true),
-          PlaybackControl::Pause => self.player.set_playing(false),
+          PlaybackControl::Play => self.player.play(),
+          PlaybackControl::Pause => self.player.pause(),
           PlaybackControl::Toggle => self.player.toggle_playback(),
         },
         Message::SetTrack(path) => self

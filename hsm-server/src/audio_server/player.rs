@@ -119,21 +119,21 @@ impl Player {
     }
   }
 
-  pub fn set_playing(&self, playing: bool) {
-    if playing {
-      self
-        .controls
-        .playback_state
-        .store(PlaybackState::Playing, Ordering::Relaxed);
-    } else {
-      // Don't un-stop playback on pause
-      let _ = self.controls.playback_state.compare_exchange(
-        PlaybackState::Playing,
-        PlaybackState::Paused,
-        Ordering::Relaxed,
-        Ordering::Relaxed,
-      );
-    }
+  pub fn play(&self) {
+    self
+      .controls
+      .playback_state
+      .store(PlaybackState::Playing, Ordering::Relaxed);
+  }
+
+  pub fn pause(&self) {
+    // Don't un-stop playback on pause
+    let _ = self.controls.playback_state.compare_exchange(
+      PlaybackState::Playing,
+      PlaybackState::Paused,
+      Ordering::Relaxed,
+      Ordering::Relaxed,
+    );
   }
 
   pub fn toggle_playback(&self) {
