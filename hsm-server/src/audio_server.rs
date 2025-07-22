@@ -47,7 +47,7 @@ impl AudioServer {
     }
   }
 
-  pub async fn run(&mut self) -> Result<(), io::Error> {
+  pub async fn run(&self) -> Result<(), io::Error> {
     (self.player.run(), self.handle_messages()).race().await
   }
 }

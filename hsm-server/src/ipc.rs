@@ -31,7 +31,7 @@ impl<'ex> IpcServer<'ex> {
     }
   }
 
-  pub async fn run<'s>(&'s mut self) -> Result<(), io::Error> {
+  pub async fn run(&self) -> Result<(), io::Error> {
     let listener = UnixListener::bind(&self.socket_path)?;
 
     while let Some(stream) = listener.incoming().next().await {
