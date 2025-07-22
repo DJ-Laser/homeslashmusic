@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use serde::{Deserialize, Serialize};
 
 use super::{
@@ -28,5 +30,23 @@ impl SealedRequest for Playback {
   }
 }
 impl Request for Playback {
+  type Response = responses::Handled;
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoadTrack {
+  pub path: PathBuf,
+}
+impl LoadTrack {
+  pub fn new(path: PathBuf) -> Self {
+    Self { path }
+  }
+}
+impl SealedRequest for LoadTrack {
+  fn qualified_request(self) -> QualifiedRequest {
+    QualifiedRequest::LoadTrack(self)
+  }
+}
+impl Request for LoadTrack {
   type Response = responses::Handled;
 }

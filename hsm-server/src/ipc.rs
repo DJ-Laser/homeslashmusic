@@ -108,4 +108,15 @@ impl RequestHandler for StreamHandler {
       .map_err(|e| e.to_string())
       .map(|_| responses::Handled)
   }
+
+  async fn handle_load_track(&self, request: requests::LoadTrack) -> Reply<requests::LoadTrack> {
+    use crate::audio_server::message::Message;
+
+    self
+      .message_tx
+      .send(Message::SetTrack(request.path))
+      .await
+      .map_err(|e| e.to_string())
+      .map(|_| responses::Handled)
+  }
 }

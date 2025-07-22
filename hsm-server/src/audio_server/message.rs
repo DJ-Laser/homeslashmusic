@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 pub enum PlaybackControl {
   Play,
   Pause,
@@ -6,4 +8,5 @@ pub enum PlaybackControl {
 
 pub enum Message {
   Playback(PlaybackControl),
+  SetTrack(PathBuf),
 }

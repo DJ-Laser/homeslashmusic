@@ -43,6 +43,11 @@ impl AudioServer {
           PlaybackControl::Pause => self.player.set_playing(false),
           PlaybackControl::Toggle => self.player.toggle_playback(),
         },
+        Message::SetTrack(path) => self
+          .player
+          .set_current_track(path)
+          .await
+          .unwrap_or_else(|e| eprintln!("Error opening track: {}", e)),
       }
     }
   }

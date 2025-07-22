@@ -9,6 +9,7 @@ pub(crate) mod private {
   pub enum QualifiedRequest {
     Version(requests::Version),
     Playback(requests::Playback),
+    LoadTrack(requests::LoadTrack),
   }
 }
 
@@ -16,6 +17,7 @@ pub(crate) mod private {
 pub trait RequestHandler {
   async fn handle_version(&self, request: requests::Version) -> Reply<requests::Version>;
   async fn handle_playback(&self, request: requests::Playback) -> Reply<requests::Playback>;
+  async fn handle_load_track(&self, request: requests::LoadTrack) -> Reply<requests::LoadTrack>;
 }
 
 fn serialize_reply<R: client::Request>(reply: &Reply<R>) -> String {
@@ -46,6 +48,9 @@ pub async fn handle_request(request_data: &str, handler: &impl RequestHandler) -
     }
     private::QualifiedRequest::Playback(request) => {
       serialize_reply::<requests::Playback>(&handler.handle_playback(request).await)
+    }
+    private::QualifiedRequest::LoadTrack(request) => {
+      serialize_reply::<requests::Playback>(&handler.handle_load_track(request).await)
     }
   }
 }

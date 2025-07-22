@@ -1,7 +1,7 @@
 use std::{
   fs::File as SyncFile,
   io::{self, BufReader as SyncBufReader},
-  path::Path,
+  path::PathBuf,
   sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
@@ -36,7 +36,7 @@ impl Controls {
   pub fn new() -> Self {
     Self {
       playback_state: AtomicPlaybackState::new(PlaybackState::Stopped),
-      loop_mode: AtomicLoopMode::new(LoopMode::Track),
+      loop_mode: AtomicLoopMode::new(LoopMode::None),
       to_skip: AtomicUsize::new(0),
       volume: Mutex::new(1.0),
     }
@@ -44,7 +44,9 @@ impl Controls {
 }
 
 pub struct Player {
-  track_queue: Arc<SourcesQueueInput>,
+  source_queue: Arc<SourcesQueueInput>,
+  source_count: AtomicUsize,
+
   controls: Arc<Controls>,
   source_tx: Sender<SourceEvent>,
   source_rx: Receiver<SourceEvent>,
@@ -63,7 +65,8 @@ impl Player {
 
     (
       Self {
-        track_queue: queue_in,
+        source_queue: queue_in,
+        source_count: AtomicUsize::new(0),
         controls: Arc::new(Controls::new()),
         source_tx,
         source_rx,
@@ -72,8 +75,7 @@ impl Player {
     )
   }
 
-  async fn load_file<P: AsRef<Path>>(&self, path: P) -> Result<impl Source + 'static, io::Error> {
-    let path = path.as_ref().to_owned();
+  async fn load_file(&self, path: PathBuf) -> Result<impl Source + 'static, io::Error> {
     let (path, file, len) = smol::unblock(|| {
       let file = SyncFile::open(&path)?;
       let len = file.metadata()?.len();
@@ -99,21 +101,16 @@ impl Player {
   }
 
   pub async fn run(&self) -> Result<(), io::Error> {
-    let add_source = async || {
-      let source = self
-        .load_file("/home/dj_laser/Music/get out!.mp3")
-        .await
-        .unwrap();
-      self.track_queue.append(source);
-    };
-
-    add_source().await;
-
     loop {
       let event = match self.source_rx.recv().await {
         Ok(event) => event,
         Err(_) => unreachable!("Source event channel should never close while in use"),
       };
+
+      if event.indicates_end() {
+        let s = self.source_count.fetch_sub(1, Ordering::AcqRel);
+        println!("Sources: {}", s - 1)
+      }
 
       match event {
         SourceEvent::LoopError(error) => eprintln!("Error looping source: {}", error),
@@ -149,5 +146,20 @@ impl Player {
       .controls
       .playback_state
       .store(new_state, Ordering::Relaxed);
+  }
+
+  fn skip(&self, num_tracks: usize) {
+    self.controls.to_skip.store(
+      num_tracks.max(self.source_count.load(Ordering::Acquire)),
+      Ordering::Release,
+    );
+  }
+
+  pub async fn set_current_track(&self, path: PathBuf) -> io::Result<()> {
+    let source = self.load_file(path).await?;
+    self.skip(self.source_count.load(Ordering::Acquire));
+    self.source_queue.append(source);
+    self.source_count.fetch_add(1, Ordering::Release);
+    Ok(())
   }
 }

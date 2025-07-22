@@ -17,6 +17,17 @@ pub enum SourceEvent {
   Looped,
 }
 
+impl SourceEvent {
+  /// If this event indicates that the soutrce has ended.
+  /// Used to manage the player's internal source count
+  pub fn indicates_end(&self) -> bool {
+    match self {
+      Self::Finished | Self::LoopError(_) => true,
+      Self::Looped => false,
+    }
+  }
+}
+
 type WrappedSourceInner<S> = ControlledSource<Skippable<Pausable<Amplify<TrackPosition<S>>>>>;
 
 const SOURCE_UPDATE_INTERVAL: Duration = Duration::from_millis(5);
