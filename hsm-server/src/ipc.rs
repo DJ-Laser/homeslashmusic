@@ -1,39 +1,47 @@
 use std::{fs, path::PathBuf, sync::Arc};
 
 use hsm_ipc::{
-  Reply, requests, responses,
+  Reply,
+  requests::{self, Playback},
+  responses,
   server::{RequestHandler, handle_request},
 };
 use smol::{
   Executor,
+  channel::Sender,
   io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader},
   net::unix::{UnixListener, UnixStream},
   stream::StreamExt,
 };
 
+use crate::audio_server::message;
+
 pub struct IpcServer<'ex> {
   socket_path: PathBuf,
+  message_tx: Sender<message::Message>,
   ex: Arc<Executor<'ex>>,
 }
 
 impl<'ex> IpcServer<'ex> {
-  pub fn new(ex: Arc<Executor<'ex>>) -> Self {
+  pub fn new(message_tx: Sender<message::Message>, ex: Arc<Executor<'ex>>) -> Self {
     Self {
       socket_path: PathBuf::from(hsm_ipc::socket_path()),
+      message_tx,
       ex,
     }
   }
 
-  pub async fn run(&mut self) -> Result<(), io::Error>
-where {
+  pub async fn run<'s>(&'s mut self) -> Result<(), io::Error> {
     let listener = UnixListener::bind(&self.socket_path)?;
 
     while let Some(stream) = listener.incoming().next().await {
+      let message_tx = self.message_tx.clone();
+
       self
         .ex
-        .spawn(async move {
+        .spawn(async {
           let res = if let Ok(stream) = stream {
-            StreamHandler::new().handle_stream(stream).await
+            StreamHandler::new(message_tx).handle_stream(stream).await
           } else {
             stream.map(|_| ())
           };
@@ -56,11 +64,13 @@ impl<'ex> Drop for IpcServer<'ex> {
   }
 }
 
-struct StreamHandler {}
+struct StreamHandler {
+  message_tx: Sender<message::Message>,
+}
 
 impl StreamHandler {
-  fn new() -> Self {
-    Self {}
+  fn new(message_tx: Sender<message::Message>) -> Self {
+    Self { message_tx }
   }
 
   async fn handle_stream(&self, stream: UnixStream) -> io::Result<()> {
@@ -68,7 +78,7 @@ impl StreamHandler {
     let mut stream_reader = BufReader::new(stream);
     stream_reader.read_line(&mut request_data).await?;
 
-    let reply_data = handle_request(&request_data, self);
+    let reply_data = handle_request(&request_data, self).await;
 
     let mut stream = stream_reader.into_inner();
     stream.write_all(&reply_data.as_bytes()).await?;
@@ -78,7 +88,24 @@ impl StreamHandler {
 }
 
 impl RequestHandler for StreamHandler {
-  fn handle_version(&self, _: requests::Version) -> Reply<requests::Version> {
+  async fn handle_version(&self, _: requests::Version) -> Reply<requests::Version> {
     Ok(responses::Version(hsm_ipc::version()))
+  }
+
+  async fn handle_playback(&self, request: requests::Playback) -> Reply<requests::Playback> {
+    use crate::audio_server::message::{Message, PlaybackControl};
+
+    let message = match request {
+      Playback::Play => PlaybackControl::Play,
+      Playback::Pause => PlaybackControl::Pause,
+      Playback::Toggle => PlaybackControl::Toggle,
+    };
+
+    self
+      .message_tx
+      .send(Message::Playback(message))
+      .await
+      .map_err(|e| e.to_string())
+      .map(|_| responses::Handled)
   }
 }

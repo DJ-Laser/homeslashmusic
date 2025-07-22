@@ -15,3 +15,18 @@ impl SealedRequest for Version {
 impl Request for Version {
   type Response = responses::Version;
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Playback {
+  Play,
+  Pause,
+  Toggle,
+}
+impl SealedRequest for Playback {
+  fn qualified_request(self) -> QualifiedRequest {
+    QualifiedRequest::Playback(self)
+  }
+}
+impl Request for Playback {
+  type Response = responses::Handled;
+}

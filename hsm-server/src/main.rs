@@ -16,12 +16,12 @@ fn main() {
   smol::block_on(ex.run(async {
     let ctrlc = CtrlCHandler::init();
 
-    let mut ipc_server = IpcServer::new(ex.clone());
-    let mut audio_server = AudioServer::init();
+    let (mut audio_server, message_tx) = AudioServer::init();
+    let mut ipc_server = IpcServer::new(message_tx.clone(), ex.clone());
 
     (
-      async { ipc_server.run().await.unwrap() },
-      async { audio_server.run().await },
+      async move { ipc_server.run().await.unwrap() },
+      async { audio_server.run().await.unwrap() },
       ctrlc.wait_for_ctrlc(),
     )
       .race()

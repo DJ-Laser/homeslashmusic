@@ -4,6 +4,6 @@ use ipc::send_request;
 mod ipc;
 
 fn main() {
-  let reply = send_request(requests::Version).unwrap();
+  let reply = send_request(requests::Playback::Toggle).unwrap();
   println!("{reply:?}");
 }
