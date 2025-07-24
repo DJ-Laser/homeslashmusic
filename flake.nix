@@ -32,7 +32,7 @@
     defaultPackage.${system} = self.packages.${system}.homeslashmusic;
 
     overlays.default = final: prev: {
-      n16-shell = self.packages.${system}.homeslashmusic;
+      homeslashmusic = self.packages.${system}.homeslashmusic;
     };
   };
 }
