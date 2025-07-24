@@ -1,9 +1,7 @@
 use std::{fs, path::PathBuf, sync::Arc};
 
 use hsm_ipc::{
-  Reply,
-  requests::{self, Playback},
-  responses,
+  Reply, requests, responses,
   server::{RequestHandler, handle_request},
 };
 use smol::{
@@ -94,6 +92,7 @@ impl RequestHandler for StreamHandler {
 
   async fn handle_playback(&self, request: requests::Playback) -> Reply<requests::Playback> {
     use crate::audio_server::message::Message;
+    use hsm_ipc::requests::Playback;
 
     let message = match request {
       Playback::Play => Message::Play,
@@ -106,7 +105,22 @@ impl RequestHandler for StreamHandler {
       .send(message)
       .await
       .map_err(|e| e.to_string())
-      .map(|_| responses::Handled)
+  }
+
+  async fn handle_set(&self, request: requests::Set) -> Reply<requests::Set> {
+    use crate::audio_server::message::Message;
+    use hsm_ipc::requests::Set;
+
+    let message = match request {
+      Set::Volume(volume) => Message::SetVolume(volume),
+      Set::LoopMode(loop_mode) => Message::SetLoopMode(loop_mode.into()),
+    };
+
+    self
+      .message_tx
+      .send(message)
+      .await
+      .map_err(|e| e.to_string())
   }
 
   async fn handle_load_track(&self, request: requests::LoadTrack) -> Reply<requests::LoadTrack> {
@@ -117,6 +131,5 @@ impl RequestHandler for StreamHandler {
       .send(Message::SetTrack(request.path))
       .await
       .map_err(|e| e.to_string())
-      .map(|_| responses::Handled)
   }
 }

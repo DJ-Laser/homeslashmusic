@@ -18,9 +18,13 @@ rustix = { version = "1.0.8", features = ["process"] }
 ctrlc = "3.4.7"
 futures-concurrency = "7.6.3"
 async-oneshot = "0.5.9"
+thiserror = "2.0.12"
 
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
+
+clap = { version = "4.5.41", features = ["derive"] }
+clap_complete = "4.5.48"
 
 git-version = "0.3.9"
 atomic_enum = "0.3.0"

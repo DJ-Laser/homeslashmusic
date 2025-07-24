@@ -1,4 +1,4 @@
-use std::{fmt::Debug, io};
+use std::fmt::Debug;
 
 use serde::{Serialize, de::DeserializeOwned};
 
@@ -20,13 +20,10 @@ pub trait Request: private::SealedRequest {
 pub fn serialize_request(request: impl Request) -> String {
   let mut request_data = serde_json::to_string(&request.qualified_request())
     .expect("Requests should not fail to serialize");
-  println!("{request_data}");
   request_data.push('\n');
   request_data
 }
 
-pub fn deserialize_reply<R: Request>(reply_data: &str) -> io::Result<Reply<R>> {
-  let reply = serde_json::from_str(reply_data)
-    .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error));
-  reply
+pub fn deserialize_reply<R: Request>(reply_data: &str) -> serde_json::Result<Reply<R>> {
+  serde_json::from_str(reply_data)
 }

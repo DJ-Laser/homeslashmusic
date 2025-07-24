@@ -2,6 +2,9 @@ pub mod client;
 pub mod requests;
 pub mod responses;
 pub mod server;
+mod types;
+
+pub use types::*;
 
 /// Reply from the hsm server
 ///

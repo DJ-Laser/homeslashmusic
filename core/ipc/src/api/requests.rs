@@ -3,7 +3,10 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use super::{
-  client::Request, client::private::SealedRequest, responses, server::private::QualifiedRequest,
+  LoopMode,
+  client::{Request, private::SealedRequest},
+  responses,
+  server::private::QualifiedRequest,
 };
 
 /// The `hsm_ipc::version()` of the daemon.
@@ -30,7 +33,21 @@ impl SealedRequest for Playback {
   }
 }
 impl Request for Playback {
-  type Response = responses::Handled;
+  type Response = ();
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Set {
+  Volume(f32),
+  LoopMode(LoopMode),
+}
+impl SealedRequest for Set {
+  fn qualified_request(self) -> QualifiedRequest {
+    QualifiedRequest::Set(self)
+  }
+}
+impl Request for Set {
+  type Response = ();
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,5 +65,5 @@ impl SealedRequest for LoadTrack {
   }
 }
 impl Request for LoadTrack {
-  type Response = responses::Handled;
+  type Response = ();
 }
