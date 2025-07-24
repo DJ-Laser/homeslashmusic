@@ -14,7 +14,8 @@ rustPlatform.buildRustPackage rec {
     lockFile = ../Cargo.lock;
   };
 
-  buildInputs = [pkg-config alsa-lib];
+  nativeBuildInputs = [pkg-config];
+  buildInputs = [alsa-lib];
 
   preBuild = ''
     export HSM_COMPLETION_OUT_DIR=$out/share/bash-completion/completions
