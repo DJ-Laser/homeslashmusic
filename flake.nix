@@ -26,5 +26,13 @@
       RUST_SRC_PATH = "${rustToolchain}/lib/rustlib/src/rust/src";
       LD_LIBRARY_PATH = lib.makeLibraryPath hsmDeps;
     };
+
+    packages.${system}.homeslashmusic = pkgs.callPackage ./nix/homeslashmusic.nix {};
+
+    defaultPackage.${system} = self.packages.${system}.homeslashmusic;
+
+    overlays.default = final: prev: {
+      n16-shell = self.packages.${system}.homeslashmusic;
+    };
   };
 }
