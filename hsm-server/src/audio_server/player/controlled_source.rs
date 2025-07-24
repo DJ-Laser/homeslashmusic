@@ -118,9 +118,9 @@ fn control_wrapped_source<S: Source>(controlled: &mut WrappedSourceInner<S>) {
     }
 
     let pauseable = skippable.inner_mut();
-    pauseable.set_paused(matches!(
+    pauseable.set_paused(!matches!(
       controls.playback_state.load(Ordering::Relaxed),
-      PlaybackState::Paused
+      PlaybackState::Playing
     ));
     let volume_controlled = pauseable.inner_mut();
     volume_controlled.set_factor(*controls.volume.lock_blocking());

@@ -108,8 +108,14 @@ impl Player {
       };
 
       if event.indicates_end() {
-        let s = self.source_count.fetch_sub(1, Ordering::AcqRel);
-        println!("Sources: {}", s - 1)
+        let source_count = self.source_count.fetch_sub(1, Ordering::AcqRel);
+        // Set state to stopped on last source finish
+        if source_count == 1 {
+          self
+            .controls
+            .playback_state
+            .store(PlaybackState::Stopped, Ordering::Relaxed);
+        }
       }
 
       match event {
@@ -117,6 +123,10 @@ impl Player {
         _ => (),
       }
     }
+  }
+
+  pub fn playback_state(&self) -> PlaybackState {
+    self.controls.playback_state.load(Ordering::Relaxed)
   }
 
   pub fn play(&self) {
@@ -137,7 +147,7 @@ impl Player {
   }
 
   pub fn toggle_playback(&self) {
-    let current_state = self.controls.playback_state.load(Ordering::Relaxed);
+    let current_state = self.controls.playback_state.load(Ordering::Acquire);
     let new_state = match current_state {
       PlaybackState::Paused | PlaybackState::Stopped => PlaybackState::Playing,
       PlaybackState::Playing => PlaybackState::Paused,
@@ -145,7 +155,27 @@ impl Player {
     self
       .controls
       .playback_state
-      .store(new_state, Ordering::Relaxed);
+      .store(new_state, Ordering::Release);
+  }
+
+  pub fn stop(&self) {
+    self.skip(self.source_count.load(Ordering::Acquire));
+  }
+
+  pub fn loop_mode(&self) -> LoopMode {
+    self.controls.loop_mode.load(Ordering::Relaxed)
+  }
+
+  pub fn set_loop_mode(&self, loop_mode: LoopMode) {
+    self.controls.loop_mode.store(loop_mode, Ordering::Relaxed);
+  }
+
+  pub async fn volume(&self) -> f32 {
+    *self.controls.volume.lock().await
+  }
+
+  pub async fn set_volume(&self, volume: f32) {
+    *self.controls.volume.lock().await = volume
   }
 
   fn skip(&self, num_tracks: usize) {
@@ -159,6 +189,10 @@ impl Player {
     let source = self.load_file(path).await?;
     self.skip(self.source_count.load(Ordering::Acquire));
     self.source_queue.append(source);
+    self
+      .controls
+      .playback_state
+      .store(PlaybackState::Playing, Ordering::Relaxed);
     self.source_count.fetch_add(1, Ordering::Release);
     Ok(())
   }

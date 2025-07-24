@@ -11,5 +11,6 @@ smol.workspace = true
 ctrlc.workspace = true
 futures-concurrency.workspace = true
 atomic_enum.workspace = true
+async-oneshot.workspace = true
 
 mpris-server = "0.9.0"

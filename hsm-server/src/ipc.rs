@@ -93,17 +93,17 @@ impl RequestHandler for StreamHandler {
   }
 
   async fn handle_playback(&self, request: requests::Playback) -> Reply<requests::Playback> {
-    use crate::audio_server::message::{Message, PlaybackControl};
+    use crate::audio_server::message::Message;
 
     let message = match request {
-      Playback::Play => PlaybackControl::Play,
-      Playback::Pause => PlaybackControl::Pause,
-      Playback::Toggle => PlaybackControl::Toggle,
+      Playback::Play => Message::Play,
+      Playback::Pause => Message::Pause,
+      Playback::Toggle => Message::Toggle,
     };
 
     self
       .message_tx
-      .send(Message::Playback(message))
+      .send(message)
       .await
       .map_err(|e| e.to_string())
       .map(|_| responses::Handled)

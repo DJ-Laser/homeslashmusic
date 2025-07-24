@@ -1,13 +1,15 @@
 use std::io;
 
 use futures_concurrency::future::Race;
-use message::{Message, PlaybackControl};
+use message::{Message, Query};
 use player::Player;
 use rodio::OutputStream;
 use smol::channel::{self, Receiver, Sender};
 
 pub mod message;
 mod player;
+
+pub use player::{LoopMode, PlaybackState};
 
 pub struct AudioServer {
   #[allow(dead_code)]
@@ -33,21 +35,34 @@ impl AudioServer {
     )
   }
 
+  async fn handle_query(&self, query: Query) {
+    let _ = match query {
+      Query::PlaybackState(mut tx) => tx.send(self.player.playback_state()),
+      Query::LoopMode(mut tx) => tx.send(self.player.loop_mode()),
+      Query::Volume(mut tx) => tx.send(self.player.volume().await),
+    };
+  }
+
   async fn handle_messages(&self) -> Result<(), io::Error> {
     loop {
       let message = self.message_rx.recv().await.map_err(io::Error::other)?;
 
       match message {
-        Message::Playback(message) => match message {
-          PlaybackControl::Play => self.player.play(),
-          PlaybackControl::Pause => self.player.pause(),
-          PlaybackControl::Toggle => self.player.toggle_playback(),
-        },
+        Message::Play => self.player.play(),
+        Message::Pause => self.player.pause(),
+        Message::Toggle => self.player.toggle_playback(),
+        Message::Stop => self.player.stop(),
+
+        Message::SetLoopMode(loop_mode) => self.player.set_loop_mode(loop_mode),
+        Message::SetVolume(volume) => self.player.set_volume(volume).await,
+
         Message::SetTrack(path) => self
           .player
           .set_current_track(path)
           .await
           .unwrap_or_else(|e| eprintln!("Error opening track: {}", e)),
+
+        Message::Query(query) => self.handle_query(query).await,
       }
     }
   }
