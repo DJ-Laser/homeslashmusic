@@ -1,5 +1,3 @@
-use std::io;
-
 use futures_concurrency::future::Race;
 use message::{Message, Query};
 use player::Player;
@@ -10,6 +8,16 @@ pub mod message;
 mod player;
 
 pub use player::{LoopMode, PlaybackState};
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum AudioServerError {
+  #[error("AudioServer Message channel closed")]
+  MessageChannelClosed,
+
+  #[error(transparent)]
+  PlayerError(#[from] player::errors::PlayerError),
+}
 
 pub struct AudioServer {
   #[allow(dead_code)]
@@ -43,9 +51,13 @@ impl AudioServer {
     };
   }
 
-  async fn handle_messages(&self) -> Result<(), io::Error> {
+  async fn handle_messages(&self) -> Result<(), AudioServerError> {
     loop {
-      let message = self.message_rx.recv().await.map_err(io::Error::other)?;
+      let message = self
+        .message_rx
+        .recv()
+        .await
+        .map_err(|_| AudioServerError::MessageChannelClosed)?;
 
       match message {
         Message::Play => self.player.play(),
@@ -67,7 +79,18 @@ impl AudioServer {
     }
   }
 
-  pub async fn run(&self) -> Result<(), io::Error> {
-    (self.player.run(), self.handle_messages()).race().await
+  pub async fn run(&self) -> Result<(), AudioServerError> {
+    (
+      async {
+        self
+          .player
+          .run()
+          .await
+          .map_err(AudioServerError::PlayerError)
+      },
+      self.handle_messages(),
+    )
+      .race()
+      .await
   }
 }

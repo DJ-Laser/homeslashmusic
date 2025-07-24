@@ -11,8 +11,15 @@ use smol::{
   net::unix::{UnixListener, UnixStream},
   stream::StreamExt,
 };
+use thiserror::Error;
 
 use crate::audio_server::message;
+
+#[derive(Debug, Error)]
+pub enum IpcServerError {
+  #[error("Failed to create ipc socket at {path}")]
+  FailedToCreateSocket { path: PathBuf, source: io::Error },
+}
 
 pub struct IpcServer<'ex> {
   socket_path: PathBuf,
@@ -29,8 +36,13 @@ impl<'ex> IpcServer<'ex> {
     }
   }
 
-  pub async fn run(&self) -> Result<(), io::Error> {
-    let listener = UnixListener::bind(&self.socket_path)?;
+  pub async fn run(&self) -> Result<(), IpcServerError> {
+    let listener = UnixListener::bind(&self.socket_path).map_err(|source| {
+      IpcServerError::FailedToCreateSocket {
+        path: self.socket_path.clone(),
+        source,
+      }
+    })?;
 
     while let Some(stream) = listener.incoming().next().await {
       let message_tx = self.message_tx.clone();

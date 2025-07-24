@@ -2,7 +2,7 @@ use std::io;
 
 use thiserror::Error;
 
-#[derive(Error, Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
   #[error("Could not connect to socket {path}")]
   FailedToConnectToSocket { path: String, source: io::Error },

@@ -1,6 +1,6 @@
 use std::{
   fs::File as SyncFile,
-  io::{self, BufReader as SyncBufReader},
+  io::BufReader as SyncBufReader,
   path::PathBuf,
   sync::{
     Arc,
@@ -9,6 +9,7 @@ use std::{
 };
 
 use controlled_source::{SourceEvent, wrap_source};
+use errors::{LoadTrackError, PlayerError};
 use rodio::{
   Decoder, Source,
   mixer::Mixer,
@@ -24,6 +25,7 @@ pub use control_status::{LoopMode, PlaybackState};
 
 mod control_status;
 mod controlled_source;
+pub mod errors;
 
 struct Controls {
   pub playback_state: AtomicPlaybackState,
@@ -75,12 +77,21 @@ impl Player {
     )
   }
 
-  async fn load_file(&self, path: PathBuf) -> Result<impl Source + 'static, io::Error> {
+  async fn load_file(&self, path: PathBuf) -> Result<impl Source + 'static, LoadTrackError> {
     let (path, file, len) = smol::unblock(|| {
-      let file = SyncFile::open(&path)?;
-      let len = file.metadata()?.len();
+      let file = SyncFile::open(&path).map_err(|source| LoadTrackError::FileNotFound {
+        path: path.clone(),
+        source,
+      })?;
 
-      Ok::<_, io::Error>((path, file, len))
+      let metadata = file
+        .metadata()
+        .map_err(|source| LoadTrackError::MetadataFailed {
+          path: path.clone(),
+          source,
+        })?;
+
+      Ok::<_, errors::LoadTrackError>((path, file, metadata.len()))
     })
     .await?;
 
@@ -92,7 +103,7 @@ impl Player {
       builder = builder.with_hint(extension);
     }
 
-    let decoder = builder.build().map_err(io::Error::other)?;
+    let decoder = builder.build()?;
     Ok(wrap_source(
       decoder,
       self.controls.clone(),
@@ -100,12 +111,13 @@ impl Player {
     ))
   }
 
-  pub async fn run(&self) -> Result<(), io::Error> {
+  pub async fn run(&self) -> Result<(), PlayerError> {
     loop {
-      let event = match self.source_rx.recv().await {
-        Ok(event) => event,
-        Err(_) => unreachable!("Source event channel should never close while in use"),
-      };
+      let event = self
+        .source_rx
+        .recv()
+        .await
+        .map_err(|_| PlayerError::SourceEventChannelClosed)?;
 
       if event.indicates_end() {
         let source_count = self.source_count.fetch_sub(1, Ordering::AcqRel);
@@ -185,7 +197,7 @@ impl Player {
     );
   }
 
-  pub async fn set_current_track(&self, path: PathBuf) -> io::Result<()> {
+  pub async fn set_current_track(&self, path: PathBuf) -> Result<(), LoadTrackError> {
     let source = self.load_file(path).await?;
     self.skip(self.source_count.load(Ordering::Acquire));
     self.source_queue.append(source);

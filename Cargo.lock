@@ -773,6 +773,7 @@ dependencies = [
  "mpris-server",
  "rodio",
  "smol",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
