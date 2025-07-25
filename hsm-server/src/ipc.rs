@@ -125,7 +125,7 @@ impl RequestHandler for StreamHandler {
 
     let message = match request {
       Set::Volume(volume) => Message::SetVolume(volume),
-      Set::LoopMode(loop_mode) => Message::SetLoopMode(loop_mode.into()),
+      Set::LoopMode(loop_mode) => Message::SetLoopMode(loop_mode),
     };
 
     self

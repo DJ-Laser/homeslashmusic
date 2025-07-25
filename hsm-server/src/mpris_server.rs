@@ -1,9 +1,10 @@
+use hsm_ipc::{LoopMode, PlaybackState};
 use mpris_impl::MprisImpl;
 use mpris_server::{LoopStatus, PlaybackStatus, Property, Server, zbus};
 use smol::channel::{Receiver, Sender};
 use thiserror::Error;
 
-use crate::audio_server::{LoopMode, PlaybackState, event::Event, message::Message};
+use crate::audio_server::{event::Event, message::Message};
 
 mod mpris_impl;
 

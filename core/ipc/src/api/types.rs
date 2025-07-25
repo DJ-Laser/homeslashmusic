@@ -1,13 +1,15 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[repr(usize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PlaybackState {
   Playing,
   Paused,
   Stopped,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[repr(usize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LoopMode {
   None,
   Track,

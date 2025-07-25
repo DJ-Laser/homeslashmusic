@@ -11,6 +11,7 @@ use std::{
 
 use controlled_source::{SourceEvent, wrap_source};
 use errors::{LoadTrackError, PlayerError};
+use hsm_ipc::{LoopMode, PlaybackState};
 use rodio::{
   Decoder, Source,
   mixer::Mixer,
@@ -21,12 +22,11 @@ use smol::{
   lock::Mutex,
 };
 
-use control_status::{AtomicLoopMode, AtomicPlaybackState};
-pub use control_status::{LoopMode, PlaybackState};
+use atomic_control_status::{AtomicLoopMode, AtomicPlaybackState};
 
 use super::event::Event;
 
-mod control_status;
+mod atomic_control_status;
 mod controlled_source;
 pub mod errors;
 

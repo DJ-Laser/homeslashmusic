@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use async_oneshot as oneshot;
+use hsm_ipc::LoopMode;
 use mpris_server::{
   LoopStatus, Metadata, PlaybackRate, PlaybackStatus, PlayerInterface, RootInterface, Time,
   TrackId, Volume,
@@ -8,10 +9,7 @@ use mpris_server::{
 };
 use smol::channel::Sender;
 
-use crate::audio_server::{
-  LoopMode,
-  message::{Message, Query},
-};
+use crate::audio_server::message::{Message, Query};
 
 use super::{loop_status, playback_status};
 

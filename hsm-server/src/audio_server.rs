@@ -12,7 +12,6 @@ pub mod event;
 pub mod message;
 mod player;
 
-pub use player::{LoopMode, PlaybackState};
 use thiserror::Error;
 
 #[derive(Debug, Error)]

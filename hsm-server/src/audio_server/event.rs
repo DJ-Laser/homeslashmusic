@@ -1,4 +1,4 @@
-use super::{LoopMode, PlaybackState};
+use hsm_ipc::{LoopMode, PlaybackState};
 
 #[derive(Debug, Clone)]
 pub enum Event {
