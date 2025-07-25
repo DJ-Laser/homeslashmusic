@@ -9,9 +9,11 @@ use mpris_server::{
 use smol::channel::Sender;
 
 use crate::audio_server::{
-  LoopMode, PlaybackState,
+  LoopMode,
   message::{Message, Query},
 };
+
+use super::{loop_status, playback_status};
 
 pub struct MprisImpl {
   message_tx: Sender<Message>,
@@ -148,22 +150,12 @@ impl PlayerInterface for MprisImpl {
 
   async fn playback_status(&self) -> fdo::Result<PlaybackStatus> {
     let playback_state = self.try_query(Query::PlaybackState).await?;
-
-    Ok(match playback_state {
-      PlaybackState::Playing => PlaybackStatus::Playing,
-      PlaybackState::Paused => PlaybackStatus::Paused,
-      PlaybackState::Stopped => PlaybackStatus::Stopped,
-    })
+    Ok(playback_status(playback_state))
   }
 
   async fn loop_status(&self) -> fdo::Result<LoopStatus> {
-    let playback_state = self.try_query(Query::LoopMode).await?;
-
-    Ok(match playback_state {
-      LoopMode::None => LoopStatus::None,
-      LoopMode::Track => LoopStatus::Track,
-      LoopMode::Playlist => LoopStatus::Playlist,
-    })
+    let loop_mode = self.try_query(Query::LoopMode).await?;
+    Ok(loop_status(loop_mode))
   }
 
   async fn set_loop_status(&self, loop_status: LoopStatus) -> zbus::Result<()> {

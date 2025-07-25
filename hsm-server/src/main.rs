@@ -19,8 +19,13 @@ fn main() {
     let ctrlc = CtrlCHandler::init();
 
     let (audio_server, message_tx) = AudioServer::init();
+    let mpris_server = MprisServer::init(
+      message_tx.clone(),
+      audio_server.register_event_listener().await,
+    )
+    .await
+    .unwrap();
     let ipc_server = IpcServer::new(message_tx.clone(), ex.clone());
-    let mpris_server = MprisServer::init(message_tx.clone()).await.unwrap();
 
     (
       async move { ipc_server.run().await.unwrap() },

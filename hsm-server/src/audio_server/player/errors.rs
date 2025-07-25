@@ -5,8 +5,13 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum PlayerError {
+  /// Should never happen since the player managers both ends of the channel
   #[error("Internal Player Error: SourceEvent channel closed")]
-  SourceEventChannelClosed,
+  SourceChannelClosed,
+
+  /// Since we use an unbounded channel, an error means it must be closed
+  #[error("Event channel closed")]
+  EventChannelClosed,
 }
 
 #[derive(Debug, Error)]

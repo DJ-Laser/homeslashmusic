@@ -1,6 +1,7 @@
 use atomic_enum::atomic_enum;
 
 #[atomic_enum]
+#[derive(PartialEq, Eq)]
 pub enum PlaybackState {
   Playing,
   Paused,
@@ -18,6 +19,7 @@ impl From<hsm_ipc::PlaybackState> for PlaybackState {
 }
 
 #[atomic_enum]
+#[derive(PartialEq, Eq)]
 pub enum LoopMode {
   None,
   Track,
