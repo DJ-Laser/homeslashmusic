@@ -122,8 +122,12 @@ fn control_wrapped_source<S: Source>(controlled: &mut WrappedSourceInner<S>) {
       controls.playback_state.load(Ordering::Relaxed),
       PlaybackState::Playing
     ));
+
     let volume_controlled = pauseable.inner_mut();
     volume_controlled.set_factor(*controls.volume.lock_blocking());
+
+    let position_tracked = volume_controlled.inner_mut();
+    *controls.position.lock_blocking() = position_tracked.get_pos();
   });
 }
 

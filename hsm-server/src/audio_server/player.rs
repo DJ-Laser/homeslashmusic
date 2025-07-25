@@ -6,6 +6,7 @@ use std::{
     Arc,
     atomic::{AtomicUsize, Ordering},
   },
+  time::Duration,
 };
 
 use controlled_source::{SourceEvent, wrap_source};
@@ -32,8 +33,9 @@ pub mod errors;
 struct Controls {
   pub playback_state: AtomicPlaybackState,
   pub loop_mode: AtomicLoopMode,
-  pub to_skip: AtomicUsize,
   pub volume: Mutex<f32>,
+  pub to_skip: AtomicUsize,
+  pub position: Mutex<Duration>,
 }
 
 impl Controls {
@@ -43,6 +45,7 @@ impl Controls {
       loop_mode: AtomicLoopMode::new(LoopMode::None),
       to_skip: AtomicUsize::new(0),
       volume: Mutex::new(1.0),
+      position: Mutex::new(Duration::ZERO),
     }
   }
 }
@@ -210,6 +213,10 @@ impl Player {
     Ok(())
   }
 
+  pub async fn position(&self) -> Duration {
+    *self.controls.position.lock().await
+  }
+
   fn skip(&self, num_tracks: usize) {
     self.controls.to_skip.store(
       num_tracks.max(self.source_count.load(Ordering::Acquire)),
@@ -242,6 +249,7 @@ impl Player {
         // Set state to stopped on last source finish
         if source_count == 1 {
           self.set_playback_state(PlaybackState::Stopped)?;
+          *self.controls.position.lock().await = Duration::ZERO;
         }
       }
 

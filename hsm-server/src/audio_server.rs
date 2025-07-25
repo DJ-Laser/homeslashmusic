@@ -86,6 +86,7 @@ impl AudioServer {
       Query::PlaybackState(mut tx) => tx.send(self.player.playback_state()),
       Query::LoopMode(mut tx) => tx.send(self.player.loop_mode()),
       Query::Volume(mut tx) => tx.send(self.player.volume().await),
+      Query::Position(mut tx) => tx.send(self.player.position().await),
     };
   }
 

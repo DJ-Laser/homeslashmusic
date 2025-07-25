@@ -175,8 +175,14 @@ impl PlayerInterface for MprisImpl {
     Ok(1.0)
   }
 
-  async fn set_rate(&self, _rate: PlaybackRate) -> zbus::Result<()> {
-    Self::unsupported_set("SetRate is not supported")
+  async fn set_rate(&self, rate: PlaybackRate) -> zbus::Result<()> {
+    if rate == 0.0 {
+      self.pause().await?;
+    } else if rate != 1.0 {
+      Self::unsupported_set("Unsupported rate")?
+    }
+
+    Ok(())
   }
 
   async fn shuffle(&self) -> fdo::Result<bool> {
@@ -206,7 +212,10 @@ impl PlayerInterface for MprisImpl {
   }
 
   async fn position(&self) -> fdo::Result<Time> {
-    Self::unsupported("Position is not supported")
+    self
+      .try_query(Query::Position)
+      .await
+      .map(|position| Time::from_micros(position.as_micros() as i64))
   }
 
   async fn minimum_rate(&self) -> fdo::Result<PlaybackRate> {

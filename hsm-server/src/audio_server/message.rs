@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, time::Duration};
 
 use async_oneshot as oneshot;
 
@@ -8,6 +8,7 @@ pub enum Query {
   PlaybackState(oneshot::Sender<PlaybackState>),
   LoopMode(oneshot::Sender<LoopMode>),
   Volume(oneshot::Sender<f32>),
+  Position(oneshot::Sender<Duration>),
 }
 
 pub enum Message {
