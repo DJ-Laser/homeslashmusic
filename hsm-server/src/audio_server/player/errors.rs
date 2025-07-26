@@ -25,3 +25,12 @@ pub enum LoadTrackError {
   #[error("Could not load track: {0}")]
   Decoder(#[from] DecoderError),
 }
+
+#[derive(Debug, Error)]
+pub enum SeekError {
+  #[error("Internal Player Error: SeekError channel closed")]
+  ErrorChannelClosed,
+
+  #[error("Failed to seek: {0}")]
+  SeekFailed(String),
+}

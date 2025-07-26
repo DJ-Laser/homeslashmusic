@@ -1,6 +1,6 @@
 use hsm_ipc::{LoopMode, PlaybackState};
 use mpris_impl::MprisImpl;
-use mpris_server::{LoopStatus, PlaybackStatus, Property, Server, zbus};
+use mpris_server::{LoopStatus, PlaybackStatus, Property, Server, Signal, Time, zbus};
 use smol::channel::{Receiver, Sender};
 use thiserror::Error;
 
@@ -52,6 +52,14 @@ impl MprisServer {
         self
           .server
           .properties_changed([Property::Volume(volume.into())])
+          .await?;
+      }
+      Event::Seeked(position) => {
+        self
+          .server
+          .emit(Signal::Seeked {
+            position: Time::from_micros(position.as_micros() as i64),
+          })
           .await?;
       }
     }

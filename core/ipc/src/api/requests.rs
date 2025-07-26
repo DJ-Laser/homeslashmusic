@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use super::{
-  LoopMode,
+  LoopMode, SeekPosition,
   client::{Request, private::SealedRequest},
   responses,
   server::private::QualifiedRequest,
@@ -66,5 +66,23 @@ impl SealedRequest for LoadTrack {
   }
 }
 impl Request for LoadTrack {
+  type Response = ();
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Seek {
+  pub seek_position: SeekPosition,
+}
+impl Seek {
+  pub fn new(seek_position: SeekPosition) -> Self {
+    Self { seek_position }
+  }
+}
+impl SealedRequest for Seek {
+  fn qualified_request(self) -> QualifiedRequest {
+    QualifiedRequest::Seek(self)
+  }
+}
+impl Request for Seek {
   type Response = ();
 }

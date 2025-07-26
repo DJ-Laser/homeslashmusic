@@ -3,6 +3,7 @@ use std::{
   time::Duration,
 };
 
+use hsm_ipc::SeekPosition;
 use rodio::{
   Source,
   source::{Amplify, Pausable, SeekError, Skippable, TrackPosition},
@@ -12,6 +13,7 @@ use smol::channel::Sender;
 use super::{Controls, LoopMode, PlaybackState};
 
 pub enum SourceEvent {
+  Seeked(Duration),
   LoopError(SeekError),
   Finished,
   Looped,
@@ -23,7 +25,7 @@ impl SourceEvent {
   pub fn indicates_end(&self) -> bool {
     match self {
       Self::Finished | Self::LoopError(_) => true,
-      Self::Looped => false,
+      _ => false,
     }
   }
 }
@@ -43,8 +45,8 @@ where
   I: Source,
 {
   #[inline]
-  pub fn with_controls(&mut self, f: impl FnOnce(&mut I, &Arc<Controls>)) {
-    f(&mut self.input, &self.controls)
+  pub fn with_controls(&mut self, f: impl FnOnce(&mut I, &Arc<Controls>, &Sender<SourceEvent>)) {
+    f(&mut self.input, &self.controls, &self.source_tx)
   }
 }
 
@@ -109,7 +111,7 @@ where
 }
 
 fn control_wrapped_source<S: Source>(controlled: &mut WrappedSourceInner<S>) {
-  controlled.with_controls(|skippable, controls| {
+  controlled.with_controls(|skippable, controls, source_tx| {
     let to_skip = controls.to_skip.load(Ordering::Acquire);
     if to_skip > 0 {
       skippable.skip();
@@ -127,6 +129,23 @@ fn control_wrapped_source<S: Source>(controlled: &mut WrappedSourceInner<S>) {
     volume_controlled.set_factor(*controls.volume.lock_blocking());
 
     let position_tracked = volume_controlled.inner_mut();
+    if let Some((seek_position, mut tx)) = controls.seek_position.lock_blocking().take() {
+      let current_position = position_tracked.get_pos();
+      let seek_position = match seek_position {
+        SeekPosition::Forward(duration) => current_position.saturating_add(duration),
+        SeekPosition::Backward(duration) => current_position.saturating_sub(duration),
+        SeekPosition::To(position) => position,
+      };
+
+      let _ = tx.send(
+        position_tracked
+          .try_seek(seek_position)
+          .map_err(|error| super::errors::SeekError::SeekFailed(error.to_string())),
+      );
+
+      let _ = source_tx.try_send(SourceEvent::Seeked(seek_position));
+    }
+
     *controls.position.lock_blocking() = position_tracked.get_pos();
   });
 }

@@ -106,11 +106,17 @@ impl AudioServer {
         Message::SetLoopMode(loop_mode) => self.player.set_loop_mode(loop_mode)?,
         Message::SetVolume(volume) => self.player.set_volume(volume).await?,
 
+        Message::Seek(seek_position) => self
+          .player
+          .seek(seek_position)
+          .await
+          .unwrap_or_else(|error| eprintln!("{}", error)),
+
         Message::SetTrack(path) => self
           .player
           .set_current_track(path)
           .await
-          .unwrap_or_else(|e| eprintln!("Error opening track: {}", e)),
+          .unwrap_or_else(|error| eprintln!("{}", error)),
 
         Message::Query(query) => self.handle_query(query).await,
       }

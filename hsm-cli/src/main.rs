@@ -18,6 +18,7 @@ fn handle_command(command: Cli) -> Result<(), crate::Error> {
 
     Command::Volume { volume } => send_request(requests::Set::Volume(volume))?,
     Command::Loop { loop_mode } => send_request(requests::Set::LoopMode(loop_mode.into()))?,
+    Command::Seek { seek_position } => send_request(requests::Seek::new(seek_position.0))?,
     Command::SetTrack { path } => send_request(requests::LoadTrack::new(path))?,
   };
 

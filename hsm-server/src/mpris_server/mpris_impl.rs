@@ -1,7 +1,7 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, time::Duration};
 
 use async_oneshot as oneshot;
-use hsm_ipc::LoopMode;
+use hsm_ipc::{LoopMode, SeekPosition};
 use mpris_server::{
   LoopStatus, Metadata, PlaybackRate, PlaybackStatus, PlayerInterface, RootInterface, Time,
   TrackId, Volume,
@@ -129,12 +129,27 @@ impl PlayerInterface for MprisImpl {
     self.try_send(Message::Play).await
   }
 
-  async fn seek(&self, _offset: Time) -> fdo::Result<()> {
-    Self::unsupported("Seek is not supported")
+  async fn seek(&self, offset: Time) -> fdo::Result<()> {
+    if offset.is_zero() {
+      return Ok(());
+    }
+
+    let seek_offset = if offset.is_positive() {
+      SeekPosition::Forward(Duration::from_micros(offset.as_micros() as u64))
+    } else {
+      SeekPosition::Backward(Duration::from_micros(offset.abs().as_micros() as u64))
+    };
+
+    self.try_send(Message::Seek(seek_offset)).await
   }
 
-  async fn set_position(&self, _track_id: TrackId, _position: Time) -> fdo::Result<()> {
-    Self::unsupported("SetPosition is not supported")
+  async fn set_position(&self, _track_id: TrackId, position: Time) -> fdo::Result<()> {
+    if position.is_negative() {
+      return Ok(());
+    }
+
+    let seek_position = SeekPosition::To(Duration::from_micros(position.as_micros() as u64));
+    self.try_send(Message::Seek(seek_position)).await
   }
 
   async fn open_uri(&self, uri: String) -> fdo::Result<()> {
@@ -241,7 +256,7 @@ impl PlayerInterface for MprisImpl {
   }
 
   async fn can_seek(&self) -> fdo::Result<bool> {
-    Ok(false)
+    Ok(true)
   }
 
   async fn can_control(&self) -> fdo::Result<bool> {

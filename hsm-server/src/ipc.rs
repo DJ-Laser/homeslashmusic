@@ -145,4 +145,14 @@ impl RequestHandler for StreamHandler {
       .await
       .map_err(|e| e.to_string())
   }
+
+  async fn handle_seek(&self, request: requests::Seek) -> Reply<requests::Seek> {
+    use crate::audio_server::message::Message;
+
+    self
+      .message_tx
+      .send(Message::Seek(request.seek_position))
+      .await
+      .map_err(|e| e.to_string())
+  }
 }

@@ -9,9 +9,10 @@ use std::{
   time::Duration,
 };
 
+use async_oneshot as oneshot;
 use controlled_source::{SourceEvent, wrap_source};
-use errors::{LoadTrackError, PlayerError};
-use hsm_ipc::{LoopMode, PlaybackState};
+use errors::{LoadTrackError, PlayerError, SeekError};
+use hsm_ipc::{LoopMode, PlaybackState, SeekPosition};
 use rodio::{
   Decoder, Source,
   mixer::Mixer,
@@ -36,6 +37,7 @@ struct Controls {
   pub volume: Mutex<f32>,
   pub to_skip: AtomicUsize,
   pub position: Mutex<Duration>,
+  pub seek_position: Mutex<Option<(SeekPosition, oneshot::Sender<Result<(), SeekError>>)>>,
 }
 
 impl Controls {
@@ -46,6 +48,7 @@ impl Controls {
       to_skip: AtomicUsize::new(0),
       volume: Mutex::new(1.0),
       position: Mutex::new(Duration::ZERO),
+      seek_position: Mutex::new(None),
     }
   }
 }
@@ -217,6 +220,13 @@ impl Player {
     *self.controls.position.lock().await
   }
 
+  pub async fn seek(&self, seek_position: SeekPosition) -> Result<(), SeekError> {
+    let (tx, rx) = oneshot::oneshot();
+    *self.controls.seek_position.lock().await = Some((seek_position, tx));
+
+    rx.await.map_err(|_| SeekError::ErrorChannelClosed)?
+  }
+
   fn skip(&self, num_tracks: usize) {
     self.controls.to_skip.store(
       num_tracks.max(self.source_count.load(Ordering::Acquire)),
@@ -255,6 +265,7 @@ impl Player {
 
       match event {
         SourceEvent::LoopError(error) => eprintln!("Error looping source: {}", error),
+        SourceEvent::Seeked(position) => self.emit(Event::Seeked(position))?,
         _ => (),
       }
     }

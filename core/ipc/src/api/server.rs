@@ -11,6 +11,7 @@ pub(crate) mod private {
     Playback(requests::Playback),
     Set(requests::Set),
     LoadTrack(requests::LoadTrack),
+    Seek(requests::Seek),
   }
 }
 
@@ -20,6 +21,7 @@ pub trait RequestHandler {
   async fn handle_playback(&self, request: requests::Playback) -> Reply<requests::Playback>;
   async fn handle_set(&self, request: requests::Set) -> Reply<requests::Set>;
   async fn handle_load_track(&self, request: requests::LoadTrack) -> Reply<requests::LoadTrack>;
+  async fn handle_seek(&self, request: requests::Seek) -> Reply<requests::Seek>;
 }
 
 fn serialize_reply<R: client::Request>(reply: &Reply<R>) -> String {
@@ -55,7 +57,10 @@ pub async fn handle_request(request_data: &str, handler: &impl RequestHandler) -
       serialize_reply::<requests::Set>(&handler.handle_set(request).await)
     }
     private::QualifiedRequest::LoadTrack(request) => {
-      serialize_reply::<requests::Playback>(&handler.handle_load_track(request).await)
+      serialize_reply::<requests::LoadTrack>(&handler.handle_load_track(request).await)
+    }
+    private::QualifiedRequest::Seek(request) => {
+      serialize_reply::<requests::Seek>(&handler.handle_seek(request).await)
     }
   }
 }
