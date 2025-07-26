@@ -26,6 +26,7 @@ pub enum Playback {
   Play,
   Pause,
   Toggle,
+  Stop,
 }
 impl SealedRequest for Playback {
   fn qualified_request(self) -> QualifiedRequest {

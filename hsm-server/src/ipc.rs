@@ -110,6 +110,7 @@ impl RequestHandler for StreamHandler {
       Playback::Play => Message::Play,
       Playback::Pause => Message::Pause,
       Playback::Toggle => Message::Toggle,
+      Playback::Stop => Message::Stop,
     };
 
     self

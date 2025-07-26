@@ -13,15 +13,18 @@ pub enum Command {
   Play,
   Pause,
   PlayPause,
+  Stop,
 
-  SetVolume { volume: f32 },
-  SetLoop { loop_mode: LoopMode },
+  Volume { volume: f32 },
+
+  Loop { loop_mode: LoopMode },
   SetTrack { path: PathBuf },
 }
 
 #[derive(Debug, Clone, ValueEnum)]
 pub enum LoopMode {
   Off,
+  #[value(alias = "on")]
   Track,
   Playlist,
 }

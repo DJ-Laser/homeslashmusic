@@ -14,9 +14,10 @@ fn handle_command(command: Cli) -> Result<(), crate::Error> {
     Command::Play => send_request(requests::Playback::Play)?,
     Command::Pause => send_request(requests::Playback::Pause)?,
     Command::PlayPause => send_request(requests::Playback::Toggle)?,
+    Command::Stop => send_request(requests::Playback::Stop)?,
 
-    Command::SetVolume { volume } => send_request(requests::Set::Volume(volume))?,
-    Command::SetLoop { loop_mode } => send_request(requests::Set::LoopMode(loop_mode.into()))?,
+    Command::Volume { volume } => send_request(requests::Set::Volume(volume))?,
+    Command::Loop { loop_mode } => send_request(requests::Set::LoopMode(loop_mode.into()))?,
     Command::SetTrack { path } => send_request(requests::LoadTrack::new(path))?,
   };
 
