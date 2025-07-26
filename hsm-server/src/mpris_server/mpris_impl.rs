@@ -5,7 +5,7 @@ use hsm_ipc::{LoopMode, SeekPosition};
 use mpris_server::{
   LoopStatus, Metadata, PlaybackRate, PlaybackStatus, PlayerInterface, RootInterface, Time,
   TrackId, Volume,
-  zbus::{self, fdo},
+  zbus::{self, fdo, zvariant::ObjectPath},
 };
 use smol::channel::Sender;
 
@@ -207,7 +207,13 @@ impl PlayerInterface for MprisImpl {
   }
 
   async fn metadata(&self) -> fdo::Result<Metadata> {
-    Self::unsupported("Metadata is not supported")
+    Ok(
+      Metadata::builder()
+        .trackid(ObjectPath::from_static_str_unchecked(
+          "/dev/djlaser/HomeSlashMusic/DefaultTrack",
+        ))
+        .build(),
+    )
   }
 
   async fn volume(&self) -> fdo::Result<Volume> {
