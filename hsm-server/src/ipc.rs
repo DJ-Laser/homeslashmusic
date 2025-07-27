@@ -63,14 +63,14 @@ impl<'ex> IpcServer<'ex> {
         .detach();
     }
 
-    unreachable!("Iterating over `Incoming` should never return `None`")
+    unreachable!("Iterating over Incoming should never return None")
   }
 }
 
 impl<'ex> Drop for IpcServer<'ex> {
   fn drop(&mut self) {
     let _ = fs::remove_file(&self.socket_path);
-    println!("Removing socket: `{:?}`", self.socket_path)
+    println!("Removing socket: {:?}", self.socket_path)
   }
 }
 
