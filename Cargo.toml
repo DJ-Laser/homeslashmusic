@@ -15,7 +15,7 @@ hsm-ipc = { path = "./core/ipc" }
 rodio = "0.21.1"
 smol = "2.0.2"
 rustix = { version = "1.0.8", features = ["process"] }
-ctrlc = "3.4.7"
+async-signal = "0.2.12"
 futures-concurrency = "7.6.3"
 async-oneshot = "0.5.9"
 thiserror = "2.0.12"
