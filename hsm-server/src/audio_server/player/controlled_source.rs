@@ -16,6 +16,7 @@ pub enum SourceEvent {
   Seeked(Duration),
   LoopError(SeekError),
   Finished,
+  Skipped,
   Looped,
 }
 
@@ -68,7 +69,7 @@ where
   #[inline]
   fn next(&mut self) -> Option<Self::Item> {
     if self.should_skip {
-      let _ = self.source_tx.try_send(SourceEvent::Finished);
+      let _ = self.source_tx.try_send(SourceEvent::Skipped);
       return None;
     }
 

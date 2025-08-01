@@ -1,7 +1,14 @@
+use std::{
+  path::PathBuf,
+  sync::{Arc, Weak},
+};
+
+use dashmap::DashMap;
 use event::Event;
 use futures_concurrency::future::Race;
+use hsm_ipc::Track;
 use message::{Message, Query};
-use player::{Player, track};
+use player::{InsertPosition, Player, errors::LoadTrackError, track};
 use rodio::OutputStream;
 use smol::{
   channel::{self, Receiver, Sender},
@@ -30,6 +37,9 @@ pub struct AudioServer {
   #[allow(dead_code)]
   output_stream: OutputStream,
   player: Player,
+  /// Mapping from cannonical path to track
+  loaded_tracks: DashMap<PathBuf, Weak<Track>>,
+
   message_rx: Receiver<Message>,
   player_event_rx: Receiver<Event>,
   event_broadcast_tx: Mutex<Vec<Sender<Event>>>,
@@ -46,6 +56,7 @@ impl AudioServer {
     (
       Self {
         player: Player::connect_new(player_event_tx, output_stream.mixer()),
+        loaded_tracks: DashMap::new(),
         output_stream,
         message_rx,
         player_event_rx,
@@ -90,6 +101,21 @@ impl AudioServer {
     };
   }
 
+  async fn get_or_load_track(&self, path: PathBuf) -> Result<Arc<Track>, LoadTrackError> {
+    let Some(track) = self
+      .loaded_tracks
+      .get(&path)
+      .and_then(|weak| weak.upgrade())
+    else {
+      let track = Arc::new(track::from_file(path.clone()).await?);
+      self.loaded_tracks.insert(path, Arc::downgrade(&track));
+
+      return Ok(track);
+    };
+
+    return Ok(track);
+  }
+
   async fn handle_messages(&self) -> Result<(), AudioServerError> {
     loop {
       let message = self
@@ -115,7 +141,19 @@ impl AudioServer {
 
         Message::SetTrack(path, mut tx) => {
           println!("Loading track: {:?}", path);
-          let track = match track::from_file(path).await {
+          let cannonical_path = match path
+            .canonicalize()
+            .map_err(LoadTrackError::CannonicalizeFailed)
+          {
+            Ok(cannonical_path) => cannonical_path,
+            Err(error) => {
+              eprintln!("{}", error);
+              let _ = tx.send(Err(error));
+              continue;
+            }
+          };
+
+          let track = match self.get_or_load_track(cannonical_path).await {
             Ok(track) => track,
             Err(error) => {
               eprintln!("{}", error);
@@ -124,7 +162,7 @@ impl AudioServer {
             }
           };
 
-          let _ = match self.player.set_current_track(track).await {
+          let _ = match self.player.insert_track(InsertPosition::End, track).await {
             Ok(()) => tx.send(Ok(())),
             Err(error) => {
               eprintln!("{}", error);

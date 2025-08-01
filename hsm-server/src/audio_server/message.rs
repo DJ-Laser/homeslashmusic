@@ -1,4 +1,4 @@
-use std::{path::PathBuf, time::Duration};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use async_oneshot as oneshot;
 use hsm_ipc::{LoopMode, PlaybackState, SeekPosition, Track};
@@ -10,7 +10,7 @@ pub enum Query {
   LoopMode(oneshot::Sender<LoopMode>),
   Volume(oneshot::Sender<f32>),
   Position(oneshot::Sender<Duration>),
-  CurrentTrack(oneshot::Sender<Option<Track>>),
+  CurrentTrack(oneshot::Sender<Option<Arc<Track>>>),
 }
 
 pub enum Message {

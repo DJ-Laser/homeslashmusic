@@ -31,6 +31,33 @@ mod decoder;
 pub mod errors;
 pub mod track;
 
+pub enum InsertPosition {
+  Absolute(usize),
+  /// relative to current: `0` for current, `1` for next, etc
+  Relative(isize),
+  Start,
+  End,
+}
+
+impl InsertPosition {
+  fn get_absolute(&self, current_position: usize, track_list_len: usize) -> usize {
+    let position = match self {
+      InsertPosition::Absolute(position) => *position,
+      InsertPosition::Relative(delta) => {
+        if delta.is_negative() {
+          current_position.saturating_sub(delta.abs() as usize)
+        } else {
+          current_position.saturating_add(delta.abs() as usize)
+        }
+      }
+      InsertPosition::Start => 0,
+      InsertPosition::End => track_list_len,
+    };
+
+    position.clamp(0, track_list_len)
+  }
+}
+
 struct Controls {
   pub playback_state: AtomicPlaybackState,
   pub loop_mode: AtomicLoopMode,
@@ -54,7 +81,8 @@ impl Controls {
 }
 
 pub struct Player {
-  current_track: Mutex<Option<Track>>,
+  track_list: Mutex<Vec<Arc<Track>>>,
+  current_index: AtomicUsize,
 
   source_queue: Arc<SourcesQueueInput>,
   source_count: AtomicUsize,
@@ -78,7 +106,8 @@ impl Player {
 
     (
       Self {
-        current_track: Mutex::new(None),
+        track_list: Mutex::new(Vec::new()),
+        current_index: AtomicUsize::new(0),
         source_queue: queue_in,
         source_count: AtomicUsize::new(0),
         controls: Arc::new(Controls::new()),
@@ -114,13 +143,26 @@ impl Player {
   }
 
   pub async fn play(&self) -> Result<(), PlayerError> {
-    let prev_state = self.set_playback_state(PlaybackState::Playing)?;
-    if matches!(prev_state, PlaybackState::Stopped) {
-      self
-        .recreate_source_queue()
-        .await
-        .unwrap_or_else(|error| eprintln!("Failed to resume playback: {error}"));
+    if matches!(
+      self.controls.playback_state.load(Ordering::Acquire),
+      PlaybackState::Stopped
+    ) {
+      let had_tracks = match self.recreate_source_queue().await {
+        Ok(had_tracks) => had_tracks,
+        Err(error) => {
+          eprintln!("Failed to resume playback: {error}");
+          return Ok(());
+        }
+      };
+
+      if !had_tracks {
+        println!("Not playing, stopped");
+        return Ok(());
+      }
     }
+
+    self.set_playback_state(PlaybackState::Playing)?;
+    println!("PLAYING");
 
     Ok(())
   }
@@ -143,15 +185,12 @@ impl Player {
 
   pub async fn toggle_playback(&self) -> Result<(), PlayerError> {
     let current_state = self.controls.playback_state.load(Ordering::Acquire);
-    let new_state = match current_state {
-      PlaybackState::Paused | PlaybackState::Stopped => PlaybackState::Playing,
-      PlaybackState::Playing => PlaybackState::Paused,
-    };
-    self
-      .controls
-      .playback_state
-      .store(new_state, Ordering::Release);
-    self.emit(Event::PlaybackStateChanged(new_state))
+    match current_state {
+      PlaybackState::Paused | PlaybackState::Stopped => self.play().await?,
+      PlaybackState::Playing => self.pause().await?,
+    }
+
+    Ok(())
   }
 
   pub async fn stop(&self) -> Result<(), PlayerError> {
@@ -215,31 +254,116 @@ impl Player {
     wrap_source(source, self.controls.clone(), self.source_tx.clone())
   }
 
-  async fn recreate_source_queue(&self) -> Result<(), LoadTrackError> {
+  async fn clear_source_queue(&self) {
     self.skip(self.source_count.load(Ordering::Acquire));
+  }
 
-    if let Some(track) = self.current_track.lock().await.as_ref() {
-      let source = self.wrap_source(TrackDecoder::new(track.clone()).await?);
-      self.source_queue.append(source);
-      self.source_count.fetch_add(1, Ordering::Release);
+  async fn add_track_to_queue(&self, track: &Arc<Track>) -> Result<(), LoadTrackError> {
+    let source = self.wrap_source(TrackDecoder::new(track.as_ref().clone()).await?);
+    self.source_queue.append(source);
+    self.source_count.fetch_add(1, Ordering::Release);
+
+    Ok(())
+  }
+
+  async fn preload_next_track(&self) -> Result<(), LoadTrackError> {
+    let tracks = self.track_list.lock().await;
+    let current_index = self.current_index.load(Ordering::Acquire);
+    if let Some(next_track) = tracks.get(current_index + 1) {
+      self.add_track_to_queue(&next_track).await?;
     }
 
     Ok(())
   }
 
-  pub async fn set_current_track(&self, track: Track) -> Result<(), LoadTrackError> {
-    *self.current_track.lock().await = Some(track);
-    self.recreate_source_queue().await?;
-    self
-      .controls
-      .playback_state
-      .store(PlaybackState::Playing, Ordering::Relaxed);
+  /// Returns false if there were no tracks to load
+  async fn recreate_source_queue(&self) -> Result<bool, LoadTrackError> {
+    self.clear_source_queue().await;
+    {
+      let tracks = self.track_list.lock().await;
+      if tracks.len() == 0 {
+        return Ok(false);
+      }
+
+      let current_index = self.current_index.load(Ordering::Acquire);
+      let current_track = &tracks[current_index];
+      self.add_track_to_queue(&current_track).await?;
+    }
+
+    // Drop tracks to prevent deadlock
+    self.preload_next_track().await?;
+
+    Ok(true)
+  }
+
+  /// Inserts a new track at a specified position in the track list
+  pub async fn insert_track(
+    &self,
+    position: InsertPosition,
+    track: Arc<Track>,
+  ) -> Result<(), LoadTrackError> {
+    {
+      let mut tracks = self.track_list.lock().await;
+      let current_index = self.current_index.load(Ordering::Acquire);
+      let track_index = position.get_absolute(current_index, tracks.len());
+
+      if tracks.len() > 0 && track_index <= current_index {
+        // If the track was instered before the current one, increment the index to keep the same track playing
+        self.current_index.fetch_add(1, Ordering::Release);
+      }
+
+      tracks.insert(track_index, track);
+      println!("idx: {track_index}");
+      println!("Len: {}", tracks.len());
+    }
+
+    // Drop tracks to prevent deadlock
+    if !matches!(
+      self.controls.playback_state.load(Ordering::Acquire),
+      PlaybackState::Stopped
+    ) {
+      self.recreate_source_queue().await?;
+    }
 
     Ok(())
   }
 
-  pub async fn current_track(&self) -> Option<Track> {
-    self.current_track.lock().await.clone()
+  pub async fn current_track(&self) -> Option<Arc<Track>> {
+    let tracks = self.track_list.lock().await;
+    let current_index = self.current_index.load(Ordering::Acquire);
+    tracks.get(current_index).map(|track| track.clone())
+  }
+
+  pub async fn increment_current_index(&self) -> Result<Result<(), LoadTrackError>, PlayerError> {
+    {
+      let tracks = self.track_list.lock().await;
+      let new_index = 1 + self.current_index.fetch_add(1, Ordering::Release);
+      println!("finished, incremented to: {new_index}");
+      println!("len: {}", tracks.len());
+
+      if new_index >= tracks.len() {
+        println!("reached end, index=0");
+        self.current_index.store(0, Ordering::Release);
+
+        if tracks.len() == 0
+          || !matches!(
+            self.controls.loop_mode.load(Ordering::Acquire),
+            LoopMode::Playlist
+          )
+        {
+          println!("Stopping");
+          self.stop().await?;
+        } else {
+          println!("Looping");
+          if let Err(error) = self.add_track_to_queue(&tracks[0]).await {
+            return Ok(Err(error));
+          };
+        }
+      }
+    }
+
+    // Drop tracks to prevent deadlock
+    Ok(self.preload_next_track().await)
   }
 
   pub async fn run(&self) -> Result<(), PlayerError> {
@@ -251,9 +375,16 @@ impl Player {
         .map_err(|_| PlayerError::SourceChannelClosed)?;
 
       if event.indicates_end() {
-        let source_count = self.source_count.fetch_sub(1, Ordering::AcqRel);
+        self.source_count.fetch_sub(1, Ordering::Acquire);
+        if !matches!(event, SourceEvent::Skipped) {
+          self
+            .increment_current_index()
+            .await?
+            .unwrap_or_else(|error| eprintln!("Failed to resume load next track: {error}"));
+        }
+
         // Set state to stopped on last source finish
-        if source_count == 1 {
+        if self.source_count.load(Ordering::Acquire) == 0 {
           self.set_playback_state(PlaybackState::Stopped)?;
           *self.controls.position.lock().await = Duration::ZERO;
         }
