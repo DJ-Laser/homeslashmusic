@@ -1,6 +1,9 @@
-use hsm_ipc::{LoopMode, PlaybackState};
+use hsm_ipc::{LoopMode, PlaybackState, Track};
 use mpris_impl::MprisImpl;
-use mpris_server::{LoopStatus, PlaybackStatus, Property, Server, Signal, Time, zbus};
+use mpris_server::{
+  LoopStatus, Metadata, PlaybackStatus, Property, Server, Signal, Time,
+  zbus::{self, zvariant::ObjectPath},
+};
 use smol::channel::{Receiver, Sender};
 use thiserror::Error;
 
@@ -94,4 +97,37 @@ fn loop_status(loop_mode: LoopMode) -> LoopStatus {
     LoopMode::Track => LoopStatus::Track,
     LoopMode::Playlist => LoopStatus::Playlist,
   }
+}
+
+fn metadata(track: &Track) -> Metadata {
+  let track_id = ObjectPath::from_static_str_unchecked("/dev/djlaser/HomeSlashMusic/DefaultTrack");
+
+  let metadata = track.metadata().clone();
+  let mut builder = Metadata::builder()
+    .trackid(track_id)
+    .artist(metadata.artists)
+    .genre(metadata.genres)
+    .comment(metadata.comments);
+
+  if let Some(title) = metadata.title {
+    builder = builder.title(title);
+  }
+
+  if let Some(album) = metadata.album {
+    builder = builder.album(album);
+  }
+
+  if let Some(track_number) = metadata.track_number {
+    builder = builder.track_number(track_number as i32);
+  }
+
+  if let Some(date) = metadata.date {
+    builder = builder.content_created(date);
+  }
+
+  if let Some(duration) = track.audio_spec().total_duration {
+    builder = builder.length(Time::from_micros(duration.as_micros() as i64));
+  }
+
+  builder.build()
 }

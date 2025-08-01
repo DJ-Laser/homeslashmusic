@@ -17,6 +17,9 @@ pub enum PlayerError {
 #[derive(Debug, Error)]
 pub enum LoadTrackError {
   #[error("Could not load track: {0}")]
+  CannonicalizeFailed(#[source] io::Error),
+
+  #[error("Could not load track: {0}")]
   OpenFailed(#[source] io::Error),
 
   #[error("Could not load track: {0}")]

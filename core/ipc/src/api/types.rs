@@ -1,4 +1,4 @@
-use std::{path::PathBuf, time::Duration};
+use std::{collections::HashSet, path::PathBuf, time::Duration};
 
 use serde::{Deserialize, Serialize};
 
@@ -38,16 +38,17 @@ pub struct AudioSpec {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct TrackMetadata {
   pub title: Option<String>,
-  pub artist: Option<String>,
+  pub artists: HashSet<String>,
   pub album: Option<String>,
   pub track_number: Option<usize>,
   pub date: Option<String>,
-  pub genre: Option<String>,
-  pub comment: Option<String>,
+  pub genres: HashSet<String>,
+  pub comments: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Track {
+  /// The cannonical file path
   file_path: PathBuf,
   audio_spec: AudioSpec,
   metadata: TrackMetadata,

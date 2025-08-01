@@ -80,7 +80,7 @@ pub fn update_metadata(metadata: &mut TrackMetadata, tag: &Tag) {
     }
     Some(StandardTagKey::Artist) => {
       if let Value::String(artist) = &tag.value {
-        metadata.artist = Some(artist.into());
+        metadata.artists.insert(artist.into());
       }
     }
     Some(StandardTagKey::Album) => {
@@ -104,12 +104,12 @@ pub fn update_metadata(metadata: &mut TrackMetadata, tag: &Tag) {
     }
     Some(StandardTagKey::Genre) => {
       if let Value::String(genre) = &tag.value {
-        metadata.genre = Some(genre.into());
+        metadata.genres.insert(genre.into());
       }
     }
     Some(StandardTagKey::Comment) => {
       if let Value::String(comment) = &tag.value {
-        metadata.comment = Some(comment.into());
+        metadata.comments.push(comment.into());
       }
     }
     _ => (),
@@ -119,7 +119,9 @@ pub fn update_metadata(metadata: &mut TrackMetadata, tag: &Tag) {
 /// Load a `Track` from a specified file path
 /// This will attempt to decode the first audio packet to ensure a correct `AudioSpec`
 pub async fn from_file(path: PathBuf) -> Result<Track, LoadTrackError> {
-  let file_path = path.clone();
+  let file_path = path
+    .canonicalize()
+    .map_err(LoadTrackError::CannonicalizeFailed)?;
 
   let (audio_spec, metadata) = smol::unblock(move || {
     let mut probed = probe_track_sync(path.clone())?;
