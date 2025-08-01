@@ -12,7 +12,8 @@ edition = "2024"
 [workspace.dependencies]
 hsm-ipc = { path = "./core/ipc" }
 
-rodio = "0.21.1"
+rodio = { version = "0.21.1", default-features = false, features = ["playback"] }
+symphonia = { version = "0.5.4", features = ["mp3", "isomp4", "aac"] }
 smol = "2.0.2"
 rustix = { version = "1.0.8", features = ["process"] }
 async-signal = "0.2.12"

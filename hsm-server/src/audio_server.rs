@@ -1,7 +1,7 @@
 use event::Event;
 use futures_concurrency::future::Race;
 use message::{Message, Query};
-use player::Player;
+use player::{Player, track};
 use rodio::OutputStream;
 use smol::{
   channel::{self, Receiver, Sender},
@@ -112,11 +112,22 @@ impl AudioServer {
           .await
           .unwrap_or_else(|error| eprintln!("{}", error)),
 
-        Message::SetTrack(path) => self
-          .player
-          .set_current_track(path)
-          .await
-          .unwrap_or_else(|error| eprintln!("{}", error)),
+        Message::SetTrack(path) => {
+          println!("Loading track: {:?}", path);
+          let track = match track::from_file(path).await {
+            Ok(track) => track,
+            Err(error) => {
+              eprintln!("{}", error);
+              continue;
+            }
+          };
+
+          self
+            .player
+            .set_current_track(track)
+            .await
+            .unwrap_or_else(|error| eprintln!("{}", error))
+        }
 
         Message::Query(query) => self.handle_query(query).await,
       }

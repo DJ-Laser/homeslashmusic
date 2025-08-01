@@ -1,6 +1,6 @@
-use std::{io, path::PathBuf};
+use std::io;
 
-use rodio::decoder::DecoderError;
+use symphonia::core::errors::Error as SymphoniaError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -16,14 +16,17 @@ pub enum PlayerError {
 
 #[derive(Debug, Error)]
 pub enum LoadTrackError {
-  #[error("Could not load track: File {path} does not exist")]
-  FileNotFound { path: PathBuf, source: io::Error },
-
-  #[error("Could not load track: failed to get metadata for file {path}")]
-  MetadataFailed { path: PathBuf, source: io::Error },
+  #[error("Could not load track: {0}")]
+  OpenFailed(#[source] io::Error),
 
   #[error("Could not load track: {0}")]
-  Decoder(#[from] DecoderError),
+  ProbeFailed(#[source] SymphoniaError),
+
+  #[error("Could not load track: Track has no supported audio codec")]
+  CodecNotSupported,
+
+  #[error("Could not load track: {0}")]
+  DecodingFailed(#[source] SymphoniaError),
 }
 
 #[derive(Debug, Error)]

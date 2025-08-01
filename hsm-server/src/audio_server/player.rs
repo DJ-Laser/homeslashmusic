@@ -1,7 +1,4 @@
 use std::{
-  fs::File as SyncFile,
-  io::BufReader as SyncBufReader,
-  path::PathBuf,
   sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
@@ -11,10 +8,11 @@ use std::{
 
 use async_oneshot as oneshot;
 use controlled_source::{SourceEvent, wrap_source};
+use decoder::TrackDecoder;
 use errors::{LoadTrackError, PlayerError, SeekError};
-use hsm_ipc::{LoopMode, PlaybackState, SeekPosition};
+use hsm_ipc::{LoopMode, PlaybackState, SeekPosition, Track};
 use rodio::{
-  Decoder, Source,
+  Source,
   mixer::Mixer,
   queue::{SourcesQueueInput, SourcesQueueOutput, queue},
 };
@@ -29,7 +27,9 @@ use super::event::Event;
 
 mod atomic_control_status;
 mod controlled_source;
+mod decoder;
 pub mod errors;
+pub mod track;
 
 struct Controls {
   pub playback_state: AtomicPlaybackState,
@@ -92,40 +92,6 @@ impl Player {
       .event_tx
       .try_send(event)
       .map_err(|_| PlayerError::EventChannelClosed)
-  }
-
-  async fn load_file(&self, path: PathBuf) -> Result<impl Source + 'static, LoadTrackError> {
-    let (path, file, len) = smol::unblock(|| {
-      let file = SyncFile::open(&path).map_err(|source| LoadTrackError::FileNotFound {
-        path: path.clone(),
-        source,
-      })?;
-
-      let metadata = file
-        .metadata()
-        .map_err(|source| LoadTrackError::MetadataFailed {
-          path: path.clone(),
-          source,
-        })?;
-
-      Ok::<_, errors::LoadTrackError>((path, file, metadata.len()))
-    })
-    .await?;
-
-    let mut builder = Decoder::builder()
-      .with_data(SyncBufReader::new(file))
-      .with_byte_len(len);
-
-    if let Some(extension) = path.extension().and_then(|s| s.to_str()) {
-      builder = builder.with_hint(extension);
-    }
-
-    let decoder = builder.build()?;
-    Ok(wrap_source(
-      decoder,
-      self.controls.clone(),
-      self.source_tx.clone(),
-    ))
   }
 
   pub fn playback_state(&self) -> PlaybackState {
@@ -234,8 +200,12 @@ impl Player {
     );
   }
 
-  pub async fn set_current_track(&self, path: PathBuf) -> Result<(), LoadTrackError> {
-    let source = self.load_file(path).await?;
+  fn wrap_source(&self, source: impl Source + 'static) -> impl Source + 'static {
+    wrap_source(source, self.controls.clone(), self.source_tx.clone())
+  }
+
+  pub async fn set_current_track(&self, track: Track) -> Result<(), LoadTrackError> {
+    let source = self.wrap_source(TrackDecoder::new(track).await?);
     self.skip(self.source_count.load(Ordering::Acquire));
     self.source_queue.append(source);
     self

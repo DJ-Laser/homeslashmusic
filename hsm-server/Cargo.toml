@@ -7,6 +7,7 @@ edition.workspace = true
 hsm-ipc.workspace = true
 
 rodio.workspace = true
+symphonia.workspace = true
 smol.workspace = true
 async-signal.workspace = true
 futures-concurrency.workspace = true
