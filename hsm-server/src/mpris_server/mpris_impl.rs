@@ -5,13 +5,13 @@ use hsm_ipc::{LoopMode, SeekPosition};
 use mpris_server::{
   LoopStatus, Metadata, PlaybackRate, PlaybackStatus, PlayerInterface, RootInterface, Time,
   TrackId, Volume,
-  zbus::{self, fdo, zvariant::ObjectPath},
+  zbus::{self, fdo},
 };
 use smol::channel::Sender;
 
 use crate::audio_server::message::{Message, Query};
 
-use super::{loop_status, playback_status};
+use super::{loop_status, metadata, playback_status};
 
 pub struct MprisImpl {
   message_tx: Sender<Message>,
@@ -207,13 +207,11 @@ impl PlayerInterface for MprisImpl {
   }
 
   async fn metadata(&self) -> fdo::Result<Metadata> {
-    Ok(
-      Metadata::builder()
-        .trackid(ObjectPath::from_static_str_unchecked(
-          "/dev/djlaser/HomeSlashMusic/DefaultTrack",
-        ))
-        .build(),
-    )
+    if let Some(track) = self.try_query(Query::CurrentTrack).await? {
+      return Ok(metadata(&track));
+    }
+
+    return Ok(Metadata::new());
   }
 
   async fn volume(&self) -> fdo::Result<Volume> {

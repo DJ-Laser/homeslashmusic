@@ -54,6 +54,8 @@ impl Controls {
 }
 
 pub struct Player {
+  current_track: Mutex<Option<Track>>,
+
   source_queue: Arc<SourcesQueueInput>,
   source_count: AtomicUsize,
 
@@ -76,6 +78,7 @@ impl Player {
 
     (
       Self {
+        current_track: Mutex::new(None),
         source_queue: queue_in,
         source_count: AtomicUsize::new(0),
         controls: Arc::new(Controls::new()),
@@ -98,7 +101,7 @@ impl Player {
     self.controls.playback_state.load(Ordering::Relaxed)
   }
 
-  fn set_playback_state(&self, new_state: PlaybackState) -> Result<(), PlayerError> {
+  fn set_playback_state(&self, new_state: PlaybackState) -> Result<PlaybackState, PlayerError> {
     let prev_state = self
       .controls
       .playback_state
@@ -107,14 +110,22 @@ impl Player {
       self.emit(Event::PlaybackStateChanged(new_state))?;
     }
 
+    Ok(prev_state)
+  }
+
+  pub async fn play(&self) -> Result<(), PlayerError> {
+    let prev_state = self.set_playback_state(PlaybackState::Playing)?;
+    if matches!(prev_state, PlaybackState::Stopped) {
+      self
+        .recreate_source_queue()
+        .await
+        .unwrap_or_else(|error| eprintln!("Failed to resume playback: {error}"));
+    }
+
     Ok(())
   }
 
-  pub fn play(&self) -> Result<(), PlayerError> {
-    self.set_playback_state(PlaybackState::Playing)
-  }
-
-  pub fn pause(&self) -> Result<(), PlayerError> {
+  pub async fn pause(&self) -> Result<(), PlayerError> {
     // Don't un-stop playback on pause
     let prev_state = self.controls.playback_state.compare_exchange(
       PlaybackState::Playing,
@@ -130,7 +141,7 @@ impl Player {
     Ok(())
   }
 
-  pub fn toggle_playback(&self) -> Result<(), PlayerError> {
+  pub async fn toggle_playback(&self) -> Result<(), PlayerError> {
     let current_state = self.controls.playback_state.load(Ordering::Acquire);
     let new_state = match current_state {
       PlaybackState::Paused | PlaybackState::Stopped => PlaybackState::Playing,
@@ -143,7 +154,7 @@ impl Player {
     self.emit(Event::PlaybackStateChanged(new_state))
   }
 
-  pub fn stop(&self) -> Result<(), PlayerError> {
+  pub async fn stop(&self) -> Result<(), PlayerError> {
     self.skip(self.source_count.load(Ordering::Acquire));
     self.set_playback_state(PlaybackState::Stopped)?;
     Ok(())
@@ -153,7 +164,7 @@ impl Player {
     self.controls.loop_mode.load(Ordering::Relaxed)
   }
 
-  pub fn set_loop_mode(&self, loop_mode: LoopMode) -> Result<(), PlayerError> {
+  pub async fn set_loop_mode(&self, loop_mode: LoopMode) -> Result<(), PlayerError> {
     let prev_mode = self.controls.loop_mode.swap(loop_mode, Ordering::Relaxed);
     if loop_mode != prev_mode {
       self.emit(Event::LoopModeChanged(loop_mode))?;
@@ -204,16 +215,31 @@ impl Player {
     wrap_source(source, self.controls.clone(), self.source_tx.clone())
   }
 
-  pub async fn set_current_track(&self, track: Track) -> Result<(), LoadTrackError> {
-    let source = self.wrap_source(TrackDecoder::new(track).await?);
+  async fn recreate_source_queue(&self) -> Result<(), LoadTrackError> {
     self.skip(self.source_count.load(Ordering::Acquire));
-    self.source_queue.append(source);
+
+    if let Some(track) = self.current_track.lock().await.as_ref() {
+      let source = self.wrap_source(TrackDecoder::new(track.clone()).await?);
+      self.source_queue.append(source);
+      self.source_count.fetch_add(1, Ordering::Release);
+    }
+
+    Ok(())
+  }
+
+  pub async fn set_current_track(&self, track: Track) -> Result<(), LoadTrackError> {
+    *self.current_track.lock().await = Some(track);
+    self.recreate_source_queue().await?;
     self
       .controls
       .playback_state
       .store(PlaybackState::Playing, Ordering::Relaxed);
-    self.source_count.fetch_add(1, Ordering::Release);
+
     Ok(())
+  }
+
+  pub async fn current_track(&self) -> Option<Track> {
+    self.current_track.lock().await.clone()
   }
 
   pub async fn run(&self) -> Result<(), PlayerError> {

@@ -86,6 +86,7 @@ impl AudioServer {
       Query::LoopMode(mut tx) => tx.send(self.player.loop_mode()),
       Query::Volume(mut tx) => tx.send(self.player.volume().await),
       Query::Position(mut tx) => tx.send(self.player.position().await),
+      Query::CurrentTrack(mut tx) => tx.send(self.player.current_track().await),
     };
   }
 
@@ -98,12 +99,12 @@ impl AudioServer {
         .map_err(|_| AudioServerError::MessageChannelClosed)?;
 
       match message {
-        Message::Play => self.player.play()?,
-        Message::Pause => self.player.pause()?,
-        Message::Toggle => self.player.toggle_playback()?,
-        Message::Stop => self.player.stop()?,
+        Message::Play => self.player.play().await?,
+        Message::Pause => self.player.pause().await?,
+        Message::Toggle => self.player.toggle_playback().await?,
+        Message::Stop => self.player.stop().await?,
 
-        Message::SetLoopMode(loop_mode) => self.player.set_loop_mode(loop_mode)?,
+        Message::SetLoopMode(loop_mode) => self.player.set_loop_mode(loop_mode).await?,
         Message::SetVolume(volume) => self.player.set_volume(volume).await?,
 
         Message::Seek(seek_position) => self
