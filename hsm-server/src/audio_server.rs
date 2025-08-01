@@ -119,12 +119,12 @@ impl AudioServer {
             Ok(track) => track,
             Err(error) => {
               eprintln!("{}", error);
-              tx.send(Err(error));
+              let _ = tx.send(Err(error));
               continue;
             }
           };
 
-          match self.player.set_current_track(track).await {
+          let _ = match self.player.set_current_track(track).await {
             Ok(()) => tx.send(Ok(())),
             Err(error) => {
               eprintln!("{}", error);

@@ -6,7 +6,7 @@ use std::{
 use hsm_ipc::SeekPosition;
 use rodio::{
   Source,
-  source::{Amplify, Pausable, SeekError, Skippable, TrackPosition},
+  source::{Amplify, Pausable, SeekError, TrackPosition},
 };
 use smol::channel::Sender;
 
@@ -30,7 +30,7 @@ impl SourceEvent {
   }
 }
 
-type WrappedSourceInner<S> = ControlledSource<Skippable<Pausable<Amplify<TrackPosition<S>>>>>;
+type WrappedSourceInner<S> = ControlledSource<Pausable<Amplify<TrackPosition<S>>>>;
 
 const SOURCE_UPDATE_INTERVAL: Duration = Duration::from_millis(5);
 
@@ -38,6 +38,7 @@ pub struct ControlledSource<I> {
   input: I,
   controls: Arc<Controls>,
   source_tx: Sender<SourceEvent>,
+  should_skip: bool,
 }
 
 impl<I> ControlledSource<I>
@@ -45,8 +46,16 @@ where
   I: Source,
 {
   #[inline]
-  pub fn with_controls(&mut self, f: impl FnOnce(&mut I, &Arc<Controls>, &Sender<SourceEvent>)) {
-    f(&mut self.input, &self.controls, &self.source_tx)
+  pub fn with_controls(
+    &mut self,
+    f: impl FnOnce(&mut I, &Arc<Controls>, &Sender<SourceEvent>, &mut bool),
+  ) {
+    f(
+      &mut self.input,
+      &self.controls,
+      &self.source_tx,
+      &mut self.should_skip,
+    )
   }
 }
 
@@ -58,6 +67,11 @@ where
 
   #[inline]
   fn next(&mut self) -> Option<Self::Item> {
+    if self.should_skip {
+      let _ = self.source_tx.try_send(SourceEvent::Finished);
+      return None;
+    }
+
     if let Some(value) = self.input.next() {
       return Some(value);
     }
@@ -111,15 +125,14 @@ where
 }
 
 fn control_wrapped_source<S: Source>(controlled: &mut WrappedSourceInner<S>) {
-  controlled.with_controls(|skippable, controls, source_tx| {
+  controlled.with_controls(|pauseable, controls, source_tx, should_skip| {
     let to_skip = controls.to_skip.load(Ordering::Acquire);
     if to_skip > 0 {
-      skippable.skip();
-      controls.to_skip.store(to_skip - 1, Ordering::Release);
+      *should_skip = true;
+      controls.to_skip.fetch_sub(1, Ordering::Release);
       return;
     }
 
-    let pauseable = skippable.inner_mut();
     pauseable.set_paused(!matches!(
       controls.playback_state.load(Ordering::Relaxed),
       PlaybackState::Playing
@@ -155,16 +168,13 @@ pub fn wrap_source<S: Source>(
   controls: Arc<Controls>,
   source_tx: Sender<SourceEvent>,
 ) -> impl Source {
-  let wrapped = source
-    .track_position()
-    .amplify(1.0)
-    .pausable(false)
-    .skippable();
+  let wrapped = source.track_position().amplify(1.0).pausable(false);
 
   let controlled = ControlledSource {
     input: wrapped,
     controls,
     source_tx,
+    should_skip: false,
   };
 
   controlled.periodic_access(SOURCE_UPDATE_INTERVAL, control_wrapped_source)
