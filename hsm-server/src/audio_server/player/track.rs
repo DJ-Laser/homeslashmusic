@@ -7,7 +7,7 @@ use symphonia::core::{
   errors::Error as SymphoniaError,
   formats::{FormatOptions, FormatReader},
   io::MediaSourceStream,
-  meta::{MetadataOptions, StandardTagKey, Tag, Value},
+  meta::{Metadata, MetadataOptions, StandardTagKey, Tag, Value},
   probe::{Hint, ProbeResult},
 };
 
@@ -71,7 +71,7 @@ fn decode_first_frame_sync<'f, 'd>(
   return Ok(decoded.spec().clone());
 }
 
-pub fn update_metadata(metadata: &mut TrackMetadata, tag: &Tag) {
+pub fn add_tag_to_metadata(metadata: &mut TrackMetadata, tag: &Tag) {
   match tag.std_key {
     Some(StandardTagKey::TrackTitle) => {
       if let Value::String(title) = &tag.value {
@@ -113,6 +113,24 @@ pub fn update_metadata(metadata: &mut TrackMetadata, tag: &Tag) {
       }
     }
     _ => (),
+  }
+}
+
+fn update_metadata(metadata: &mut TrackMetadata, metadata_log: &mut Metadata) {
+  loop {
+    let Some(revision) = metadata_log.current() else {
+      return;
+    };
+
+    for tag in revision.tags() {
+      add_tag_to_metadata(metadata, tag);
+    }
+
+    if !metadata_log.is_latest() {
+      metadata_log.pop();
+    } else {
+      break;
+    }
   }
 }
 
@@ -160,19 +178,10 @@ pub async fn from_file(path: PathBuf) -> Result<Track, LoadTrackError> {
     let mut track_metadata = Default::default();
 
     if let Some(mut metadata) = probed.metadata.get() {
-      while let Some(revision) = metadata.pop() {
-        for tag in revision.tags() {
-          update_metadata(&mut track_metadata, tag);
-        }
-      }
+      update_metadata(&mut track_metadata, &mut metadata)
     }
 
-    let mut metadata = probed.format.metadata();
-    while let Some(revision) = metadata.pop() {
-      for tag in revision.tags() {
-        update_metadata(&mut track_metadata, tag);
-      }
-    }
+    update_metadata(&mut track_metadata, &mut probed.format.metadata());
 
     Ok((audio_spec, track_metadata))
   })
