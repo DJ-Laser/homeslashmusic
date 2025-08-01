@@ -113,21 +113,24 @@ impl AudioServer {
           .await
           .unwrap_or_else(|error| eprintln!("{}", error)),
 
-        Message::SetTrack(path) => {
+        Message::SetTrack(path, mut tx) => {
           println!("Loading track: {:?}", path);
           let track = match track::from_file(path).await {
             Ok(track) => track,
             Err(error) => {
               eprintln!("{}", error);
+              tx.send(Err(error));
               continue;
             }
           };
 
-          self
-            .player
-            .set_current_track(track)
-            .await
-            .unwrap_or_else(|error| eprintln!("{}", error))
+          match self.player.set_current_track(track).await {
+            Ok(()) => tx.send(Ok(())),
+            Err(error) => {
+              eprintln!("{}", error);
+              tx.send(Err(error))
+            }
+          };
         }
 
         Message::Query(query) => self.handle_query(query).await,

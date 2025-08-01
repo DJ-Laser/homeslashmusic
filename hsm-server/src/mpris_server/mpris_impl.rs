@@ -155,7 +155,13 @@ impl PlayerInterface for MprisImpl {
   async fn open_uri(&self, uri: String) -> fdo::Result<()> {
     if let Some(file_path) = uri.strip_prefix("file://") {
       let file_path = PathBuf::from(file_path);
-      self.try_send(Message::SetTrack(file_path)).await
+
+      let (tx, rx) = oneshot::oneshot();
+      self.try_send(Message::SetTrack(file_path, tx)).await?;
+
+      let status = rx.await.map_err(Self::channel_closed_error)?;
+
+      status.map_err(|error| fdo::Error::Failed(error.to_string()))
     } else {
       Self::unsupported("Unsupported uri type")
     }

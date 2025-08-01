@@ -1,5 +1,6 @@
 use std::{fs, path::PathBuf, sync::Arc};
 
+use async_oneshot as oneshot;
 use hsm_ipc::{
   Reply, requests, responses,
   server::{RequestHandler, handle_request},
@@ -83,6 +84,10 @@ impl StreamHandler {
     Self { message_tx }
   }
 
+  fn oneshot_closed_error<T>(_t: T) -> String {
+    "Channel was unexpectedly closed".into()
+  }
+
   async fn handle_stream(&self, stream: UnixStream) -> io::Result<()> {
     let mut request_data = String::new();
     let mut stream_reader = BufReader::new(stream);
@@ -139,11 +144,15 @@ impl RequestHandler for StreamHandler {
   async fn handle_load_track(&self, request: requests::LoadTrack) -> Reply<requests::LoadTrack> {
     use crate::audio_server::message::Message;
 
+    let (tx, rx) = oneshot::oneshot();
     self
       .message_tx
-      .send(Message::SetTrack(request.path))
+      .send(Message::SetTrack(request.path, tx))
       .await
-      .map_err(|e| e.to_string())
+      .map_err(|e| e.to_string())?;
+
+    let status = rx.await.map_err(Self::oneshot_closed_error)?;
+    status.map_err(|e| e.to_string())
   }
 
   async fn handle_seek(&self, request: requests::Seek) -> Reply<requests::Seek> {
