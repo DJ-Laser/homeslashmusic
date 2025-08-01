@@ -129,5 +129,9 @@ fn metadata(track: &Track) -> Metadata {
     builder = builder.length(Time::from_micros(duration.as_micros() as i64));
   }
 
+  if let Some(path) = track.file_path().to_str() {
+    builder = builder.url(format!("file://{:?}", urlencoding::encode(path)))
+  }
+
   builder.build()
 }
