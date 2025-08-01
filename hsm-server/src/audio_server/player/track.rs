@@ -187,8 +187,5 @@ pub async fn from_file(path: PathBuf) -> Result<Track, LoadTrackError> {
   })
   .await?;
 
-  println!("{:?}", audio_spec);
-  println!("{:?}", metadata);
-
   Ok(Track::new(file_path, audio_spec, metadata))
 }
