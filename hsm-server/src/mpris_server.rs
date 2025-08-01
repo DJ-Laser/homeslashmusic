@@ -1,3 +1,5 @@
+use std::path::{Component, Path};
+
 use hsm_ipc::{LoopMode, PlaybackState, Track};
 use mpris_impl::MprisImpl;
 use mpris_server::{
@@ -99,6 +101,21 @@ fn loop_status(loop_mode: LoopMode) -> LoopStatus {
   }
 }
 
+fn encode_file_url(path: &Path) -> Option<String> {
+  let mut file_url = "file://".to_owned();
+  for component in path.components() {
+    match component {
+      Component::Normal(os_str) => {
+        file_url.push('/');
+        file_url.push_str(&urlencoding::encode(os_str.to_str()?));
+      }
+      _ => (),
+    }
+  }
+
+  Some(file_url)
+}
+
 fn metadata(track: &Track) -> Metadata {
   let track_id = ObjectPath::from_static_str_unchecked("/dev/djlaser/HomeSlashMusic/DefaultTrack");
 
@@ -129,8 +146,8 @@ fn metadata(track: &Track) -> Metadata {
     builder = builder.length(Time::from_micros(duration.as_micros() as i64));
   }
 
-  if let Some(path) = track.file_path().to_str() {
-    builder = builder.url(format!("file://{:?}", urlencoding::encode(path)))
+  if let Some(url) = encode_file_url(track.file_path()) {
+    builder = builder.url(url);
   }
 
   builder.build()
