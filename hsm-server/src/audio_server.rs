@@ -162,6 +162,7 @@ impl AudioServer {
             }
           };
 
+          self.player.clear_tracks().await?;
           let _ = match self.player.insert_track(InsertPosition::End, track).await {
             Ok(()) => tx.send(Ok(())),
             Err(error) => {
@@ -169,6 +170,8 @@ impl AudioServer {
               tx.send(Err(error))
             }
           };
+
+          self.player.play().await?;
         }
 
         Message::Query(query) => self.handle_query(query).await,
