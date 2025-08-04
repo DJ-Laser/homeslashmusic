@@ -1,4 +1,5 @@
 use std::{
+  mem,
   sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
@@ -10,7 +11,7 @@ use async_oneshot as oneshot;
 use controlled_source::{SourceEvent, wrap_source};
 use decoder::TrackDecoder;
 use errors::{LoadTrackError, PlayerError, SeekError};
-use hsm_ipc::{LoopMode, PlaybackState, SeekPosition, Track};
+use hsm_ipc::{InsertPosition, LoopMode, PlaybackState, SeekPosition, Track};
 use rodio::{Source, mixer::Mixer};
 use smol::{
   channel::{self, Receiver, Sender},
@@ -28,33 +29,6 @@ mod decoder;
 pub mod errors;
 mod output;
 pub mod track;
-
-pub enum InsertPosition {
-  Absolute(usize),
-  /// relative to current: `0` for current, `1` for next, etc
-  Relative(isize),
-  Start,
-  End,
-}
-
-impl InsertPosition {
-  fn get_absolute(&self, current_position: usize, track_list_len: usize) -> usize {
-    let position = match self {
-      InsertPosition::Absolute(position) => *position,
-      InsertPosition::Relative(delta) => {
-        if delta.is_negative() {
-          current_position.saturating_sub(delta.abs() as usize)
-        } else {
-          current_position.saturating_add(delta.abs() as usize)
-        }
-      }
-      InsertPosition::Start => 0,
-      InsertPosition::End => track_list_len,
-    };
-
-    position.clamp(0, track_list_len)
-  }
-}
 
 struct Controls {
   pub playback_state: AtomicPlaybackState,
@@ -180,14 +154,7 @@ impl Player {
       self.controls.playback_state.load(Ordering::Acquire),
       PlaybackState::Stopped
     ) {
-      let had_tracks = match self.requeue_current_track().await {
-        Ok(had_tracks) => had_tracks,
-        Err(error) => {
-          eprintln!("Failed to resume playback: {error}");
-          return Ok(());
-        }
-      };
-
+      let had_tracks = self.requeue_current_track().await?;
       if !had_tracks {
         println!("Not playing, stopped");
         return Ok(());
@@ -294,28 +261,36 @@ impl Player {
     tracks.get(current_index).map(|track| track.clone())
   }
 
-  /// Inserts a new track at a specified position in the track list
-  pub async fn insert_track(
+  /// Inserts new tracks at a specified position in the track list
+  pub async fn insert_tracks(
     &self,
     position: InsertPosition,
-    track: Arc<Track>,
-  ) -> Result<(), LoadTrackError> {
-    let current_track_changed = {
-      let mut tracks = self.track_list.lock().await;
-      let current_index = self.current_index.load(Ordering::Acquire);
-      let track_index = position.get_absolute(current_index, tracks.len());
+    new_tracks: &[Arc<Track>],
+  ) -> Result<(), PlayerError> {
+    if matches!(position, InsertPosition::Replace) {
+      self.clear_tracks().await?;
+    }
 
-      if tracks.len() > 0 && track_index <= current_index {
-        // If the track was instered before the current one, increment the index to keep the same track playing
-        self.current_index.fetch_add(1, Ordering::Release);
-      }
+    let mut tracks = self.track_list.lock().await;
+    let current_index = self.current_index.load(Ordering::Acquire);
+    let mut track_index = position.get_absolute(current_index, tracks.len());
 
-      tracks.insert(track_index, track);
-      let current_track_changed = track_index == current_index;
-      current_track_changed
-    };
+    let current_track_changed = matches!(position, InsertPosition::Relative(0));
+    if tracks.len() > 0 && track_index <= current_index && !current_track_changed {
+      // If the track was instered before the current one, increment the index to keep the same track playing
+      self
+        .current_index
+        .fetch_add(new_tracks.len(), Ordering::Release);
+    }
 
-    // Drop tracks to prevent deadlock
+    for track in new_tracks {
+      tracks.insert(track_index, track.clone());
+      track_index += 1;
+    }
+
+    // Drop tracks lock to prevent deadlock
+    mem::drop(tracks);
+
     if current_track_changed
       && !matches!(
         self.controls.playback_state.load(Ordering::Acquire),
@@ -336,7 +311,7 @@ impl Player {
     Ok(())
   }
 
-  pub async fn increment_current_index(&self) -> Result<Result<(), LoadTrackError>, PlayerError> {
+  pub async fn increment_current_index(&self) -> Result<(), PlayerError> {
     let tracks = self.track_list.lock().await;
     let new_index = 1 + self.current_index.fetch_add(1, Ordering::Release);
     println!("finished, incremented to: {new_index}");
@@ -356,13 +331,11 @@ impl Player {
         self.stop().await?;
       } else {
         println!("Looping");
-        if let Err(error) = self.queue_track(&tracks[0]).await {
-          return Ok(Err(error));
-        };
+        self.queue_track(&tracks[0]).await?;
       };
     }
 
-    Ok(Ok(()))
+    Ok(())
   }
 
   pub async fn run(&self) -> Result<(), PlayerError> {
@@ -375,10 +348,13 @@ impl Player {
 
       if event.indicates_end() {
         if !matches!(event, SourceEvent::Skipped) {
-          self
-            .increment_current_index()
-            .await?
-            .unwrap_or_else(|error| eprintln!("Failed to resume load next track: {error}"));
+          if let Err(error) = self.increment_current_index().await {
+            if error.is_recoverable() {
+              eprintln!("{error}");
+            } else {
+              return Err(error);
+            }
+          }
         }
       }
 

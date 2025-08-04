@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use super::{
-  LoopMode, SeekPosition,
+  InsertPosition, LoopMode, SeekPosition,
   client::{Request, private::SealedRequest},
   responses,
   server::private::QualifiedRequest,
@@ -52,21 +52,22 @@ impl Request for Set {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LoadTrack {
-  pub path: PathBuf,
+pub struct LoadTracks {
+  pub paths: Vec<PathBuf>,
+  pub position: InsertPosition,
 }
-impl LoadTrack {
-  pub fn new(path: PathBuf) -> Self {
-    Self { path }
+impl LoadTracks {
+  pub fn new(paths: Vec<PathBuf>, position: InsertPosition) -> Self {
+    Self { paths, position }
   }
 }
-impl SealedRequest for LoadTrack {
+impl SealedRequest for LoadTracks {
   fn qualified_request(self) -> QualifiedRequest {
     QualifiedRequest::LoadTrack(self)
   }
 }
-impl Request for LoadTrack {
-  type Response = ();
+impl Request for LoadTracks {
+  type Response = Vec<(PathBuf, String)>;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

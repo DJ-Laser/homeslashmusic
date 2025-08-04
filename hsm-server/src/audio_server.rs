@@ -1,14 +1,7 @@
-use std::{
-  path::PathBuf,
-  sync::{Arc, Weak},
-};
-
-use dashmap::DashMap;
 use event::Event;
 use futures_concurrency::future::Race;
-use hsm_ipc::Track;
 use message::{Message, Query};
-use player::{InsertPosition, Player, errors::LoadTrackError, track};
+use player::Player;
 use rodio::OutputStream;
 use smol::{
   channel::{self, Receiver, Sender},
@@ -18,8 +11,10 @@ use smol::{
 pub mod event;
 pub mod message;
 mod player;
+mod track_cache;
 
 use thiserror::Error;
+use track_cache::TrackCache;
 
 #[derive(Debug, Error)]
 pub enum AudioServerError {
@@ -33,12 +28,21 @@ pub enum AudioServerError {
   PlayerError(#[from] player::errors::PlayerError),
 }
 
+impl AudioServerError {
+  pub fn is_recoverable(&self) -> bool {
+    match self {
+      AudioServerError::PlayerError(error) => error.is_recoverable(),
+      _ => false,
+    }
+  }
+}
+
 pub struct AudioServer {
   #[allow(dead_code)]
   output_stream: OutputStream,
   player: Player,
   /// Mapping from cannonical path to track
-  loaded_tracks: DashMap<PathBuf, Weak<Track>>,
+  track_cache: TrackCache,
 
   message_rx: Receiver<Message>,
   player_event_rx: Receiver<Event>,
@@ -56,7 +60,7 @@ impl AudioServer {
     (
       Self {
         player: Player::connect_new(player_event_tx, output_stream.mixer()),
-        loaded_tracks: DashMap::new(),
+        track_cache: TrackCache::new(),
         output_stream,
         message_rx,
         player_event_rx,
@@ -101,19 +105,46 @@ impl AudioServer {
     };
   }
 
-  async fn get_or_load_track(&self, path: PathBuf) -> Result<Arc<Track>, LoadTrackError> {
-    let Some(track) = self
-      .loaded_tracks
-      .get(&path)
-      .and_then(|weak| weak.upgrade())
-    else {
-      let track = Arc::new(track::from_file(path.clone()).await?);
-      self.loaded_tracks.insert(path, Arc::downgrade(&track));
+  async fn handle_message(&self, message: Message) -> Result<(), AudioServerError> {
+    match message {
+      Message::Play => self.player.play().await?,
+      Message::Pause => self.player.pause().await?,
+      Message::Toggle => self.player.toggle_playback().await?,
+      Message::Stop => self.player.stop().await?,
 
-      return Ok(track);
-    };
+      Message::SetLoopMode(loop_mode) => self.player.set_loop_mode(loop_mode).await?,
+      Message::SetVolume(volume) => self.player.set_volume(volume).await?,
 
-    return Ok(track);
+      Message::Seek(seek_position) => self
+        .player
+        .seek(seek_position)
+        .await
+        .unwrap_or_else(|error| eprintln!("Failed to seek: {}", error)),
+
+      Message::InsertTracks {
+        paths,
+        position,
+        mut error_tx,
+      } => {
+        println!("Loading tracks: {:?}", paths);
+        let (tracks, errors) = self.track_cache.get_or_load_tracks(paths).await;
+
+        for (path, error) in errors.iter() {
+          eprintln!("Could not load track {path:?}: {error}")
+        }
+
+        let _ = error_tx.send(errors);
+
+        self.player.insert_tracks(position, &tracks).await?;
+        for track in tracks {
+          println!("Loaded track {:?}", track.file_path());
+        }
+      }
+
+      Message::Query(query) => self.handle_query(query).await,
+    }
+
+    Ok(())
   }
 
   async fn handle_messages(&self) -> Result<(), AudioServerError> {
@@ -123,58 +154,12 @@ impl AudioServer {
         .recv()
         .await
         .map_err(|_| AudioServerError::MessageChannelClosed)?;
-
-      match message {
-        Message::Play => self.player.play().await?,
-        Message::Pause => self.player.pause().await?,
-        Message::Toggle => self.player.toggle_playback().await?,
-        Message::Stop => self.player.stop().await?,
-
-        Message::SetLoopMode(loop_mode) => self.player.set_loop_mode(loop_mode).await?,
-        Message::SetVolume(volume) => self.player.set_volume(volume).await?,
-
-        Message::Seek(seek_position) => self
-          .player
-          .seek(seek_position)
-          .await
-          .unwrap_or_else(|error| eprintln!("{}", error)),
-
-        Message::SetTrack(path, mut tx) => {
-          println!("Loading track: {:?}", path);
-          let cannonical_path = match path
-            .canonicalize()
-            .map_err(LoadTrackError::CannonicalizeFailed)
-          {
-            Ok(cannonical_path) => cannonical_path,
-            Err(error) => {
-              eprintln!("{}", error);
-              let _ = tx.send(Err(error));
-              continue;
-            }
-          };
-
-          let track = match self.get_or_load_track(cannonical_path).await {
-            Ok(track) => track,
-            Err(error) => {
-              eprintln!("{}", error);
-              let _ = tx.send(Err(error));
-              continue;
-            }
-          };
-
-          self.player.clear_tracks().await?;
-          let _ = match self.player.insert_track(InsertPosition::End, track).await {
-            Ok(()) => tx.send(Ok(())),
-            Err(error) => {
-              eprintln!("{}", error);
-              tx.send(Err(error))
-            }
-          };
-
-          self.player.play().await?;
+      if let Err(error) = self.handle_message(message).await {
+        if error.is_recoverable() {
+          eprintln!("{error}");
+        } else {
+          return Err(error);
         }
-
-        Message::Query(query) => self.handle_query(query).await,
       }
     }
   }

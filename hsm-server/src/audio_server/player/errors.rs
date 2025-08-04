@@ -12,23 +12,38 @@ pub enum PlayerError {
   /// Since we use an unbounded channel, an error means it must be closed
   #[error("Event channel closed")]
   EventChannelClosed,
+
+  #[error("Failed to load track: {0}")]
+  LoadTrack(#[from] LoadTrackError),
+}
+
+impl PlayerError {
+  pub fn is_recoverable(&self) -> bool {
+    match self {
+      PlayerError::LoadTrack(_) => true,
+      _ => false,
+    }
+  }
 }
 
 #[derive(Debug, Error)]
 pub enum LoadTrackError {
-  #[error("Could not load track: {0}")]
+  #[error("{0}")]
   CannonicalizeFailed(#[source] io::Error),
 
-  #[error("Could not load track: {0}")]
+  #[error("{0}")]
   OpenFailed(#[source] io::Error),
 
-  #[error("Could not load track: {0}")]
+  #[error("{0}")]
+  ReadDirFailed(#[source] io::Error),
+
+  #[error("{0}")]
   ProbeFailed(#[source] SymphoniaError),
 
-  #[error("Could not load track: Track has no supported audio codec")]
+  #[error("Track has no supported audio codec")]
   CodecNotSupported,
 
-  #[error("Could not load track: {0}")]
+  #[error("{0}")]
   DecodingFailed(#[source] SymphoniaError),
 }
 
@@ -37,6 +52,6 @@ pub enum SeekError {
   #[error("Internal Player Error: SeekError channel closed")]
   ErrorChannelClosed,
 
-  #[error("Failed to seek: {0}")]
+  #[error("{0}")]
   SeekFailed(String),
 }

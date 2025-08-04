@@ -1,7 +1,7 @@
 use std::{path::PathBuf, time::Duration};
 
 use async_oneshot as oneshot;
-use hsm_ipc::{LoopMode, SeekPosition};
+use hsm_ipc::{InsertPosition, LoopMode, SeekPosition};
 use mpris_server::{
   LoopStatus, Metadata, PlaybackRate, PlaybackStatus, PlayerInterface, RootInterface, Time,
   TrackId, Volume,
@@ -157,11 +157,20 @@ impl PlayerInterface for MprisImpl {
       let file_path = PathBuf::from(file_path);
 
       let (tx, rx) = oneshot::oneshot();
-      self.try_send(Message::SetTrack(file_path, tx)).await?;
+      self
+        .try_send(Message::InsertTracks {
+          paths: vec![file_path],
+          position: InsertPosition::End,
+          error_tx: tx,
+        })
+        .await?;
 
-      let status = rx.await.map_err(Self::channel_closed_error)?;
+      let errors = rx.await.map_err(Self::channel_closed_error)?;
 
-      status.map_err(|error| fdo::Error::Failed(error.to_string()))
+      match errors.first() {
+        Some((_path, error)) => Err(fdo::Error::Failed(error.to_string())),
+        None => Ok(()),
+      }
     } else {
       Self::unsupported("Unsupported uri type")
     }

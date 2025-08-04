@@ -30,7 +30,7 @@ impl TrackDecoder {
   fn new_sync(track: Track) -> Result<Self, LoadTrackError> {
     println!("Creating decoder for track {:?}", track.file_path());
 
-    let probed = probe_track_sync(track.file_path().clone())?;
+    let probed = probe_track_sync(track.file_path())?;
     let audio_track = probed
       .format
       .tracks()

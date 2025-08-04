@@ -141,18 +141,30 @@ impl RequestHandler for StreamHandler {
       .map_err(|e| e.to_string())
   }
 
-  async fn handle_load_track(&self, request: requests::LoadTrack) -> Reply<requests::LoadTrack> {
+  async fn handle_insert_track(
+    &self,
+    request: requests::LoadTracks,
+  ) -> Reply<requests::LoadTracks> {
     use crate::audio_server::message::Message;
 
     let (tx, rx) = oneshot::oneshot();
     self
       .message_tx
-      .send(Message::SetTrack(request.path, tx))
+      .send(Message::InsertTracks {
+        paths: request.paths,
+        position: request.position,
+        error_tx: tx,
+      })
       .await
       .map_err(|e| e.to_string())?;
 
-    let status = rx.await.map_err(Self::oneshot_closed_error)?;
-    status.map_err(|e| e.to_string())
+    let errors = rx.await.map_err(Self::oneshot_closed_error)?;
+    Ok(
+      errors
+        .into_iter()
+        .map(|(path, error)| (path, error.to_string()))
+        .collect(),
+    )
   }
 
   async fn handle_seek(&self, request: requests::Seek) -> Reply<requests::Seek> {

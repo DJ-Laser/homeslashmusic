@@ -2,7 +2,7 @@ use std::path;
 
 use clap::Parser;
 use cli::{Cli, Command};
-use hsm_ipc::requests;
+use hsm_ipc::{InsertPosition, requests};
 use ipc::send_request;
 
 mod cli;
@@ -23,7 +23,16 @@ fn handle_command(command: Cli) -> Result<(), crate::Error> {
     Command::Seek { seek_position } => send_request(requests::Seek::new(seek_position.0))?,
     Command::SetTrack { path } => {
       let path = path::absolute(path).map_err(crate::Error::GetCurrentDirFailed)?;
-      send_request(requests::LoadTrack::new(path))?
+      let res = send_request(requests::LoadTracks {
+        paths: vec![path],
+        position: InsertPosition::Relative(0),
+      })?;
+
+      res.map(|errors| {
+        for (path, error) in errors {
+          eprintln!("Failed to load track {path:?}: {error}")
+        }
+      })
     }
   };
 

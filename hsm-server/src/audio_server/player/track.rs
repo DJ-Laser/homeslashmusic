@@ -1,6 +1,15 @@
-use std::{fs::File as SyncFile, path::PathBuf};
+use std::{
+  fs::File as SyncFile,
+  path::{Path, PathBuf},
+  pin::pin,
+};
 
+use async_fn_stream::fn_stream;
 use hsm_ipc::{AudioSpec, Track, TrackMetadata};
+use smol::{
+  fs,
+  stream::{Stream, StreamExt},
+};
 use symphonia::core::{
   audio::SignalSpec,
   codecs::{CODEC_TYPE_NULL, Decoder, DecoderOptions},
@@ -16,7 +25,7 @@ use super::errors::LoadTrackError;
 /// Use the default symphonia probe and the path's extension as a `Hint`
 ///
 /// This function is synchronous, so it must be called inside of `smol::unblock`
-pub fn probe_track_sync(path: PathBuf) -> Result<ProbeResult, LoadTrackError> {
+pub fn probe_track_sync(path: &Path) -> Result<ProbeResult, LoadTrackError> {
   let mut hint = Hint::new();
   if let Some(extension) = path.extension().and_then(|s| s.to_str()) {
     hint.with_extension(extension);
@@ -136,13 +145,11 @@ fn update_metadata(metadata: &mut TrackMetadata, metadata_log: &mut Metadata) {
 
 /// Load a `Track` from a specified file path
 /// This will attempt to decode the first audio packet to ensure a correct `AudioSpec`
-pub async fn from_file(path: PathBuf) -> Result<Track, LoadTrackError> {
-  let file_path = path
-    .canonicalize()
-    .map_err(LoadTrackError::CannonicalizeFailed)?;
+pub async fn load_file(path: PathBuf) -> Result<Track, LoadTrackError> {
+  let outer_path = path.clone();
 
   let (audio_spec, metadata) = smol::unblock(move || {
-    let mut probed = probe_track_sync(path.clone())?;
+    let mut probed = probe_track_sync(&path)?;
 
     let audio_track = probed
       .format
@@ -187,5 +194,70 @@ pub async fn from_file(path: PathBuf) -> Result<Track, LoadTrackError> {
   })
   .await?;
 
-  Ok(Track::new(file_path, audio_spec, metadata))
+  Ok(Track::new(outer_path.clone(), audio_spec, metadata))
+}
+
+pub async fn get_cannonical_track_path(
+  path: PathBuf,
+) -> Result<PathBuf, (PathBuf, LoadTrackError)> {
+  fs::canonicalize(&path)
+    .await
+    .map_err(|error| (path, LoadTrackError::CannonicalizeFailed(error)))
+}
+
+/// Returns the cannonical paths of all tracks in a directory
+async fn search_directory(
+  directory_path: PathBuf,
+) -> impl Stream<Item = Result<PathBuf, (PathBuf, LoadTrackError)>> {
+  fn_stream(async |emitter| {
+    let mut entries = match fs::read_dir(&directory_path).await {
+      Ok(files) => files,
+      Err(error) => {
+        return emitter
+          .emit(Err((directory_path, LoadTrackError::ReadDirFailed(error))))
+          .await;
+      }
+    };
+
+    while let Some(entry) = entries.next().await {
+      let path = match entry {
+        Ok(entry) => entry.path(),
+        Err(error) => {
+          return emitter
+            .emit(Err((
+              directory_path.clone(),
+              LoadTrackError::ReadDirFailed(error),
+            )))
+            .await;
+        }
+      };
+
+      emitter.emit(get_cannonical_track_path(path).await).await;
+    }
+  })
+}
+
+/// Returns the cannonical paths of all tracks if a directory, or a single cannonical path if a file
+pub async fn search_file_or_directory(
+  path: PathBuf,
+) -> impl Stream<Item = Result<PathBuf, (PathBuf, LoadTrackError)>> {
+  fn_stream(async |emitter| {
+    let metadata = match fs::metadata(&path).await {
+      Ok(metadata) => metadata,
+      Err(error) => {
+        return emitter
+          .emit(Err((path, LoadTrackError::OpenFailed(error))))
+          .await;
+      }
+    };
+
+    if metadata.is_dir() {
+      let mut paths = pin!(search_directory(path).await);
+      while let Some(path) = paths.next().await {
+        emitter.emit(path).await;
+      }
+    } else {
+      emitter.emit(get_cannonical_track_path(path).await).await;
+    }
+  })
 }
