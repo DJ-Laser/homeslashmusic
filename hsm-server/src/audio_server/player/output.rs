@@ -54,10 +54,7 @@ impl PlayerAudioOutput {
       let mut next = self.controls.next_source.lock_blocking();
 
       match next.consume() {
-        Some(next) => {
-          println!("got source");
-          next
-        }
+        Some(next) => next,
         None => Box::new(source::Zero::new_samples(1, 44100, Self::THRESHOLD)) as Box<_>,
       }
     }

@@ -301,14 +301,11 @@ impl Player {
     Ok(())
   }
 
-  pub async fn increment_current_index(&self) -> Result<(), PlayerError> {
+  pub async fn play_next_track(&self) -> Result<(), PlayerError> {
     let tracks = self.track_list.lock().await;
     let new_index = 1 + self.current_index.fetch_add(1, Ordering::Release);
-    println!("finished, incremented to: {new_index}");
-    println!("len: {}", tracks.len());
 
     if new_index >= tracks.len() {
-      println!("reached end, index=0");
       self.current_index.store(0, Ordering::Release);
 
       if tracks.len() == 0
@@ -317,10 +314,10 @@ impl Player {
           LoopMode::Playlist
         )
       {
-        println!("Stopping");
+        println!("Track list reached end, stopping");
         self.stop().await?;
       } else {
-        println!("Looping");
+        println!("Track list reached end, looping to start");
         self.queue_track(&tracks[0]).await?;
       };
     } else {
@@ -342,7 +339,8 @@ impl Player {
 
       if event.indicates_end() {
         if !matches!(event, SourceEvent::Skipped) {
-          if let Err(error) = self.increment_current_index().await {
+          println!("Current track ended, loading next");
+          if let Err(error) = self.play_next_track().await {
             if error.is_recoverable() {
               eprintln!("{error}");
             } else {

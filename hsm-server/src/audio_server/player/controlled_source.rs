@@ -78,7 +78,6 @@ where
     if self.should_skip {
       let _ = self.source_tx.try_send(SourceEvent::Skipped);
       self.clear_playing_source();
-      println!("SKIPPED!");
       return None;
     }
 
