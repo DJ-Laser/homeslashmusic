@@ -12,6 +12,7 @@ use controlled_source::{SourceEvent, wrap_source};
 use decoder::TrackDecoder;
 use errors::{LoadTrackError, PlayerError, SeekError};
 use hsm_ipc::{InsertPosition, LoopMode, PlaybackState, SeekPosition, Track};
+use output::NextSourceState;
 use rodio::{Source, mixer::Mixer};
 use smol::{
   channel::{self, Receiver, Sender},
@@ -37,7 +38,7 @@ struct Controls {
   pub to_skip: AtomicUsize,
   pub position: Mutex<Duration>,
   pub seek_position: Mutex<Option<(SeekPosition, oneshot::Sender<Result<(), SeekError>>)>>,
-  pub next_source: Mutex<Option<Box<dyn Source + Send>>>,
+  pub next_source: Mutex<NextSourceState>,
 }
 
 impl Controls {
@@ -49,7 +50,7 @@ impl Controls {
       volume: Mutex::new(1.0),
       position: Mutex::new(Duration::ZERO),
       seek_position: Mutex::new(None),
-      next_source: Mutex::new(None),
+      next_source: Mutex::new(NextSourceState::None),
     }
   }
 }
@@ -100,21 +101,16 @@ impl Player {
   }
 
   async fn clear_source_queue(&self) {
-    self.controls.next_source.lock().await.take();
-    let num_tracks = self.track_list.lock().await.len();
-    let is_stopped = matches!(
-      self.controls.playback_state.load(Ordering::Acquire),
-      PlaybackState::Stopped,
-    );
+    let prev_source = self.controls.next_source.lock().await.clear();
 
-    if num_tracks > 0 && !is_stopped {
-      self.skip(1).await;
+    if !matches!(prev_source, NextSourceState::None) {
+      self.controls.to_skip.fetch_add(1, Ordering::AcqRel);
     }
   }
 
   async fn queue_track(&self, track: &Arc<Track>) -> Result<(), LoadTrackError> {
     let source = self.wrap_source(TrackDecoder::new(track.as_ref().clone()).await?);
-    *self.controls.next_source.lock().await = Some(Box::new(source));
+    *self.controls.next_source.lock().await = NextSourceState::Queued(Box::new(source));
 
     Ok(())
   }
@@ -156,13 +152,11 @@ impl Player {
     ) {
       let had_tracks = self.requeue_current_track().await?;
       if !had_tracks {
-        println!("Not playing, stopped");
         return Ok(());
       }
     }
 
     self.set_playback_state(PlaybackState::Playing)?;
-    println!("PLAYING");
 
     Ok(())
   }
@@ -238,21 +232,17 @@ impl Player {
   }
 
   pub async fn seek(&self, seek_position: SeekPosition) -> Result<(), SeekError> {
+    if matches!(
+      *self.controls.next_source.lock().await,
+      NextSourceState::None
+    ) {
+      return Ok(());
+    }
+
     let (tx, rx) = oneshot::oneshot();
     *self.controls.seek_position.lock().await = Some((seek_position, tx));
 
     rx.await.map_err(|_| SeekError::ErrorChannelClosed)?
-  }
-
-  async fn skip(&self, num_tracks_skipped: usize) {
-    let num_tracks = self.track_list.lock().await.len();
-    let current_index = self.current_index.load(Ordering::Acquire);
-    let max_skippable = num_tracks - current_index;
-
-    self
-      .controls
-      .to_skip
-      .store(num_tracks_skipped.max(max_skippable), Ordering::Release);
   }
 
   pub async fn current_track(&self) -> Option<Arc<Track>> {
@@ -333,6 +323,10 @@ impl Player {
         println!("Looping");
         self.queue_track(&tracks[0]).await?;
       };
+    } else {
+      // Drop tracks guard to prevent deadlock
+      mem::drop(tracks);
+      self.requeue_current_track().await?;
     }
 
     Ok(())

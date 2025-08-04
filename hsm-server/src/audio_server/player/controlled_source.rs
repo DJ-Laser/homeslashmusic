@@ -10,7 +10,7 @@ use rodio::{
 };
 use smol::channel::Sender;
 
-use super::{Controls, LoopMode, PlaybackState};
+use super::{Controls, LoopMode, PlaybackState, output::NextSourceState};
 
 pub enum SourceEvent {
   Seeked(Duration),
@@ -58,6 +58,13 @@ where
       &mut self.should_skip,
     )
   }
+
+  fn clear_playing_source(&self) {
+    let mut next_source = self.controls.next_source.lock_blocking();
+    if matches!(*next_source, NextSourceState::Playing) {
+      *next_source = NextSourceState::None;
+    }
+  }
 }
 
 impl<I> Iterator for ControlledSource<I>
@@ -70,6 +77,8 @@ where
   fn next(&mut self) -> Option<Self::Item> {
     if self.should_skip {
       let _ = self.source_tx.try_send(SourceEvent::Skipped);
+      self.clear_playing_source();
+      println!("SKIPPED!");
       return None;
     }
 
@@ -83,6 +92,7 @@ where
     ) {
       if let Err(error) = self.input.try_seek(Duration::ZERO) {
         let _ = self.source_tx.try_send(SourceEvent::LoopError(error));
+        self.clear_playing_source();
         return None;
       }
 
@@ -90,6 +100,7 @@ where
       self.input.next()
     } else {
       let _ = self.source_tx.try_send(SourceEvent::Finished);
+      self.clear_playing_source();
       None
     }
   }
@@ -122,6 +133,10 @@ where
   #[inline]
   fn total_duration(&self) -> Option<Duration> {
     self.input.total_duration()
+  }
+
+  fn try_seek(&mut self, pos: Duration) -> Result<(), SeekError> {
+    self.input.try_seek(pos)
   }
 }
 

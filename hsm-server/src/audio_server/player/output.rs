@@ -1,8 +1,38 @@
-use std::{sync::Arc, time::Duration};
+use std::{mem, sync::Arc, time::Duration};
 
 use rodio::{Sample, Source, source};
 
 use super::Controls;
+
+pub enum NextSourceState {
+  Queued(Box<dyn Source + Send>),
+  Playing,
+  None,
+}
+
+impl NextSourceState {
+  pub fn clear(&mut self) -> Self {
+    mem::replace(self, Self::None)
+  }
+
+  fn consume(&mut self) -> Option<Box<dyn Source + Send>> {
+    match self {
+      Self::Queued(_) => {
+        let state = mem::replace(self, Self::Playing);
+        let NextSourceState::Queued(source) = state else {
+          unreachable!("Moved out of a NextSourceState::Queued")
+        };
+
+        Some(source)
+      }
+      Self::Playing => {
+        self.clear();
+        None
+      }
+      Self::None => None,
+    }
+  }
+}
 
 pub struct PlayerAudioOutput {
   current: Box<dyn Source + Send>,
@@ -23,8 +53,11 @@ impl PlayerAudioOutput {
     self.current = {
       let mut next = self.controls.next_source.lock_blocking();
 
-      match next.take() {
-        Some(next) => next,
+      match next.consume() {
+        Some(next) => {
+          println!("got source");
+          next
+        }
         None => Box::new(source::Zero::new_samples(1, 44100, Self::THRESHOLD)) as Box<_>,
       }
     }
