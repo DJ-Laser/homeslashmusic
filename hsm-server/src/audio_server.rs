@@ -12,10 +12,9 @@ pub mod event;
 pub mod message;
 mod player;
 mod track;
-mod track_cache;
 
 use thiserror::Error;
-use track_cache::TrackCache;
+use track::TrackCache;
 
 #[derive(Debug, Error)]
 pub enum AudioServerError {
