@@ -8,7 +8,7 @@ use dashmap::DashMap;
 use hsm_ipc::Track;
 use smol::stream::StreamExt;
 
-use super::player::{errors::LoadTrackError, track};
+use super::track::{self, LoadTrackError};
 
 pub struct TrackCache {
   loaded_tracks: DashMap<PathBuf, Weak<Track>>,

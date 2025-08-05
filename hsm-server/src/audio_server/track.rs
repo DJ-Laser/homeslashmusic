@@ -1,5 +1,6 @@
 use std::{
   fs::File as SyncFile,
+  io,
   path::{Path, PathBuf},
   pin::pin,
 };
@@ -19,8 +20,28 @@ use symphonia::core::{
   meta::{Metadata, MetadataOptions, StandardTagKey, Tag, Value},
   probe::{Hint, ProbeResult},
 };
+use thiserror::Error;
 
-use super::errors::LoadTrackError;
+#[derive(Debug, Error)]
+pub enum LoadTrackError {
+  #[error("{0}")]
+  CannonicalizeFailed(#[source] io::Error),
+
+  #[error("{0}")]
+  OpenFailed(#[source] io::Error),
+
+  #[error("{0}")]
+  ReadDirFailed(#[source] io::Error),
+
+  #[error("{0}")]
+  ProbeFailed(#[source] SymphoniaError),
+
+  #[error("Track has no supported audio codec")]
+  CodecNotSupported,
+
+  #[error("{0}")]
+  DecodingFailed(#[source] SymphoniaError),
+}
 
 /// Use the default symphonia probe and the path's extension as a `Hint`
 ///

@@ -6,15 +6,16 @@ use std::{
 use hsm_ipc::SeekPosition;
 use rodio::{
   Source,
-  source::{Amplify, Pausable, SeekError, TrackPosition},
+  source::{Amplify, Pausable, SeekError as RodioSeekError, TrackPosition},
 };
 use smol::channel::Sender;
+use thiserror::Error;
 
 use super::{Controls, LoopMode, PlaybackState, output::NextSourceState};
 
 pub enum SourceEvent {
   Seeked(Duration),
-  LoopError(SeekError),
+  LoopError(RodioSeekError),
   Finished,
   Skipped,
   Looped,
@@ -110,6 +111,15 @@ where
   }
 }
 
+#[derive(Debug, Error)]
+pub enum SeekError {
+  #[error("Internal Player Error: SeekError channel closed")]
+  ErrorChannelClosed,
+
+  #[error("{0}")]
+  SeekFailed(String),
+}
+
 impl<I> Source for ControlledSource<I>
 where
   I: Source,
@@ -134,7 +144,7 @@ where
     self.input.total_duration()
   }
 
-  fn try_seek(&mut self, pos: Duration) -> Result<(), SeekError> {
+  fn try_seek(&mut self, pos: Duration) -> Result<(), RodioSeekError> {
     self.input.try_seek(pos)
   }
 }
@@ -168,7 +178,7 @@ fn control_wrapped_source<S: Source>(controlled: &mut WrappedSourceInner<S>) {
       let _ = tx.send(
         position_tracked
           .try_seek(seek_position)
-          .map_err(|error| super::errors::SeekError::SeekFailed(error.to_string())),
+          .map_err(|error| SeekError::SeekFailed(error.to_string())),
       );
 
       let _ = source_tx.try_send(SourceEvent::Seeked(seek_position));

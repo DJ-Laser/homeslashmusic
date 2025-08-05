@@ -3,7 +3,7 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 use async_oneshot as oneshot;
 use hsm_ipc::{InsertPosition, LoopMode, PlaybackState, SeekPosition, Track};
 
-use super::player::errors::LoadTrackError;
+use super::track::LoadTrackError;
 
 pub enum Query {
   PlaybackState(oneshot::Sender<PlaybackState>),

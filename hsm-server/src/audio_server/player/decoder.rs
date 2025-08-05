@@ -10,7 +10,7 @@ use symphonia::core::{
 
 use rodio::{ChannelCount, Sample, SampleRate, Source, source::SeekError as RodioSeekError};
 
-use super::{errors::LoadTrackError, track::probe_track_sync};
+use crate::audio_server::track::{self, LoadTrackError};
 
 /// A `Source` that decodes `Track`s using symphonia
 pub(crate) struct TrackDecoder {
@@ -30,7 +30,7 @@ impl TrackDecoder {
   fn new_sync(track: Track) -> Result<Self, LoadTrackError> {
     println!("Creating decoder for track {:?}", track.file_path());
 
-    let probed = probe_track_sync(track.file_path())?;
+    let probed = track::probe_track_sync(track.file_path())?;
     let audio_track = probed
       .format
       .tracks()

@@ -11,6 +11,7 @@ use smol::{
 pub mod event;
 pub mod message;
 mod player;
+mod track;
 mod track_cache;
 
 use thiserror::Error;
@@ -25,7 +26,7 @@ pub enum AudioServerError {
   EventChannelClosed,
 
   #[error(transparent)]
-  PlayerError(#[from] player::errors::PlayerError),
+  PlayerError(#[from] player::PlayerError),
 }
 
 impl AudioServerError {

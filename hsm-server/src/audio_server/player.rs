@@ -8,9 +8,8 @@ use std::{
 };
 
 use async_oneshot as oneshot;
-use controlled_source::{SourceEvent, wrap_source};
+use controlled_source::{SeekError, SourceEvent, wrap_source};
 use decoder::TrackDecoder;
-use errors::{LoadTrackError, PlayerError, SeekError};
 use hsm_ipc::{InsertPosition, LoopMode, PlaybackState, SeekPosition, Track};
 use output::NextSourceState;
 use rodio::{Source, mixer::Mixer};
@@ -20,16 +19,15 @@ use smol::{
 };
 
 use atomic_control_status::{AtomicLoopMode, AtomicPlaybackState};
+use thiserror::Error;
 
-use super::event::Event;
+use super::{event::Event, track::LoadTrackError};
 pub use output::PlayerAudioOutput;
 
 mod atomic_control_status;
 mod controlled_source;
 mod decoder;
-pub mod errors;
 mod output;
-pub mod track;
 
 struct Controls {
   pub playback_state: AtomicPlaybackState,
@@ -51,6 +49,29 @@ impl Controls {
       position: Mutex::new(Duration::ZERO),
       seek_position: Mutex::new(None),
       next_source: Mutex::new(NextSourceState::None),
+    }
+  }
+}
+
+#[derive(Debug, Error)]
+pub enum PlayerError {
+  /// Should never happen since the player managers both ends of the channel
+  #[error("Internal Player Error: SourceEvent channel closed")]
+  SourceChannelClosed,
+
+  /// Since we use an unbounded channel, an error means it must be closed
+  #[error("Event channel closed")]
+  EventChannelClosed,
+
+  #[error("Failed to load track: {0}")]
+  LoadTrack(#[from] LoadTrackError),
+}
+
+impl PlayerError {
+  pub fn is_recoverable(&self) -> bool {
+    match self {
+      PlayerError::LoadTrack(_) => true,
+      _ => false,
     }
   }
 }
