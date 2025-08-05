@@ -12,6 +12,7 @@ pub(crate) mod private {
     Set(requests::Set),
     LoadTrack(requests::LoadTracks),
     Seek(requests::Seek),
+    ClearTracks(requests::ClearTracks),
   }
 }
 
@@ -23,6 +24,10 @@ pub trait RequestHandler {
   async fn handle_insert_track(&self, request: requests::LoadTracks)
   -> Reply<requests::LoadTracks>;
   async fn handle_seek(&self, request: requests::Seek) -> Reply<requests::Seek>;
+  async fn handle_clear_tracks(
+    &self,
+    request: requests::ClearTracks,
+  ) -> Reply<requests::ClearTracks>;
 }
 
 fn serialize_reply<R: client::Request>(reply: &Reply<R>) -> String {
@@ -62,6 +67,9 @@ pub async fn handle_request(request_data: &str, handler: &impl RequestHandler) -
     }
     private::QualifiedRequest::Seek(request) => {
       serialize_reply::<requests::Seek>(&handler.handle_seek(request).await)
+    }
+    private::QualifiedRequest::ClearTracks(request) => {
+      serialize_reply::<requests::ClearTracks>(&handler.handle_clear_tracks(request).await)
     }
   }
 }

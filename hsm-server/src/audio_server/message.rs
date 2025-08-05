@@ -26,5 +26,6 @@ pub enum Message {
     position: InsertPosition,
     error_tx: oneshot::Sender<Vec<(PathBuf, LoadTrackError)>>,
   },
+  ClearTracks,
   Query(Query),
 }

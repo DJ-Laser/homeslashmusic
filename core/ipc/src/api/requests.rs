@@ -87,3 +87,15 @@ impl SealedRequest for Seek {
 impl Request for Seek {
   type Response = ();
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+
+pub struct ClearTracks;
+impl SealedRequest for ClearTracks {
+  fn qualified_request(self) -> QualifiedRequest {
+    QualifiedRequest::ClearTracks(self)
+  }
+}
+impl Request for ClearTracks {
+  type Response = ();
+}

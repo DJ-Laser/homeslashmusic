@@ -141,6 +141,8 @@ impl AudioServer {
         }
       }
 
+      Message::ClearTracks => self.player.clear_tracks().await?,
+
       Message::Query(query) => self.handle_query(query).await,
     }
 

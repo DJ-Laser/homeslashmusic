@@ -1,16 +1,20 @@
 use std::{num::ParseFloatError, path::PathBuf, str::FromStr, time::Duration};
 
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
-#[derive(Parser, Debug)]
+#[derive(Debug, Parser)]
 pub struct Cli {
   #[command(subcommand)]
   pub command: Command,
 }
 
-#[derive(Subcommand, Debug)]
+#[derive(Debug, Subcommand)]
 pub enum Command {
-  Play,
+  Play {
+    #[command(flatten)]
+    tracks: Option<TrackPaths>,
+  },
+
   Pause,
   PlayPause,
   Stop,
@@ -25,9 +29,38 @@ pub enum Command {
     #[arg(allow_negative_numbers = true)]
     seek_position: SeekPosition,
   },
-  SetTrack {
-    path: PathBuf,
+
+  #[command(args_conflicts_with_subcommands = true)]
+  Queue {
+    #[command(subcommand)]
+    command: Option<QueueCommand>,
+    #[command(flatten)]
+    tracks: Option<TrackPaths>,
   },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum QueueCommand {
+  Clear,
+  Replace {
+    #[command(flatten)]
+    tracks: TrackPaths,
+  },
+  #[command(alias = "append")]
+  Add {
+    #[command(flatten)]
+    tracks: TrackPaths,
+  },
+  Next {
+    #[command(flatten)]
+    tracks: TrackPaths,
+  },
+}
+
+#[derive(Debug, Args)]
+pub struct TrackPaths {
+  #[arg(num_args = 1..)]
+  pub paths: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, ValueEnum)]

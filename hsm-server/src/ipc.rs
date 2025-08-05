@@ -176,4 +176,17 @@ impl RequestHandler for StreamHandler {
       .await
       .map_err(|e| e.to_string())
   }
+
+  async fn handle_clear_tracks(
+    &self,
+    _request: requests::ClearTracks,
+  ) -> Reply<requests::ClearTracks> {
+    use crate::audio_server::message::Message;
+
+    self
+      .message_tx
+      .send(Message::ClearTracks)
+      .await
+      .map_err(|e| e.to_string())
+  }
 }
