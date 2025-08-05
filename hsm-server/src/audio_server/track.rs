@@ -242,7 +242,14 @@ async fn search_directory(
 
     while let Some(entry) = entries.next().await {
       let path = match entry {
-        Ok(entry) => entry.path(),
+        Ok(entry) => {
+          let is_file = entry.metadata().await.map(|metadata| metadata.is_file());
+          if !matches!(is_file, Ok(true)) {
+            continue;
+          }
+
+          entry.path()
+        }
         Err(error) => {
           return emitter
             .emit(Err((
