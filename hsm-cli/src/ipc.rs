@@ -5,8 +5,8 @@ use std::{
 };
 
 use hsm_ipc::{
-  Reply,
-  client::{Request, deserialize_reply, serialize_request},
+  Reply, Request,
+  client::{deserialize_reply, serialize_request},
 };
 
 pub fn send_request<R: Request>(request: R) -> Result<Reply<R>, crate::Error> {

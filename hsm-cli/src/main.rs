@@ -22,10 +22,7 @@ fn try_load_tracks(
     absolute_paths.push(path::absolute(path).map_err(crate::Error::GetCurrentDirFailed)?);
   }
 
-  let res = send_request(requests::LoadTracks {
-    paths: absolute_paths,
-    position,
-  })?;
+  let res = send_request(requests::LoadTracks(position, absolute_paths))?;
 
   Ok(res.map(|errors| {
     for (path, error) in errors {
@@ -55,17 +52,17 @@ fn handle_command(command: Cli) -> Result<(), crate::Error> {
       };
 
       match res {
-        Ok(()) => send_request(requests::Playback::Play)?,
+        Ok(()) => send_request(requests::Play)?,
         Err(error) => Err(error),
       }
     }
-    Command::Pause => send_request(requests::Playback::Pause)?,
-    Command::PlayPause => send_request(requests::Playback::Toggle)?,
-    Command::Stop => send_request(requests::Playback::Stop)?,
+    Command::Pause => send_request(requests::Pause)?,
+    Command::PlayPause => send_request(requests::TogglePlayback)?,
+    Command::Stop => send_request(requests::StopPlayback)?,
 
-    Command::Volume { volume } => send_request(requests::Set::Volume(volume))?,
-    Command::Loop { loop_mode } => send_request(requests::Set::LoopMode(loop_mode.into()))?,
-    Command::Seek { seek_position } => send_request(requests::Seek::new(seek_position.0))?,
+    Command::Volume { volume } => send_request(requests::SetVolume(volume))?,
+    Command::Loop { loop_mode } => send_request(requests::SetLoopMode(loop_mode.into()))?,
+    Command::Seek { seek_position } => send_request(requests::Seek(seek_position.0))?,
 
     Command::Queue { command, tracks } => {
       if let Some(command) = command {
@@ -81,7 +78,6 @@ fn handle_command(command: Cli) -> Result<(), crate::Error> {
   if let Err(message) = reply {
     return Err(crate::Error::Server(message));
   }
-
   Ok(())
 }
 

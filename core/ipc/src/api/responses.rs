@@ -1,5 +1,11 @@
 use serde::{Deserialize, Serialize};
 
-/// The `hsm_ipc::version()` of the daemon.
+use super::Track;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Version(pub String);
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TracksQuery {
+  track_list: Vec<Track>,
+}

@@ -1,101 +1,92 @@
 use std::path::PathBuf;
 
-use serde::{Deserialize, Serialize};
+use super::{InsertPosition, LoopMode, Request, SeekPosition, private::SealedRequest, responses};
 
-use super::{
-  InsertPosition, LoopMode, SeekPosition,
-  client::{Request, private::SealedRequest},
-  responses,
-  server::private::QualifiedRequest,
+macro_rules! requests {
+  (@def $name:ident ()) => {
+    #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+    pub struct $name;
+  };
+
+  (@def $name:ident ( $($field:ty),* )) => {
+    #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+    pub struct $name($(pub $field),*);
+  };
+
+  (@def $name:ident { $($t:tt)* } ) => {
+    #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+    pub struct $name{$($t)*}
+  };
+
+  (
+    $($name:ident $fields:tt -> $response:ty;)*
+  ) => {
+paste::paste! {
+  pub(crate) mod private {
+    use crate::{requests, Reply};
+
+    #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+    pub enum QualifiedRequest {
+      $(
+        $name(super::$name),
+      )*
+    }
+
+    pub trait RequestHandler {
+      $(
+        fn [<handle_ $name:snake>](&self, request: requests::$name) -> impl Future<Output = Reply<requests::$name>>;
+      )*
+    }
+
+    pub async fn handle_request(request_data: &str, handler: &impl RequestHandler) -> String {
+      let request = match serde_json::from_str(request_data) {
+        Ok(request) => request,
+        Err(error) => {
+          println!("{}", &error);
+          return crate::server::serialize_error(error.to_string());
+        }
+      };
+
+      match request {
+        $(
+          QualifiedRequest::$name(request) => {
+            crate::server::serialize_reply::<super::$name>(&handler.[<handle_ $name:snake>](request).await)
+          }
+        )*
+      }
+    }
+  }
+
+  $(
+    requests!(@def $name $fields);
+
+    impl SealedRequest for $name {
+      fn qualified_request(self) -> private::QualifiedRequest {
+        private::QualifiedRequest::$name(self)
+      }
+    }
+    impl Request for $name {
+      type Response = $response;
+    }
+  )*
+}
 };
-
-/// The `hsm_ipc::version()` of the daemon.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Version;
-impl SealedRequest for Version {
-  fn qualified_request(self) -> QualifiedRequest {
-    QualifiedRequest::Version(self)
-  }
-}
-impl Request for Version {
-  type Response = responses::Version;
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Playback {
-  Play,
-  Pause,
-  Toggle,
-  Stop,
-}
-impl SealedRequest for Playback {
-  fn qualified_request(self) -> QualifiedRequest {
-    QualifiedRequest::Playback(self)
-  }
-}
-impl Request for Playback {
-  type Response = ();
-}
+requests! {
+  Version() -> responses::Version;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Set {
-  Volume(f32),
-  LoopMode(LoopMode),
-}
-impl SealedRequest for Set {
-  fn qualified_request(self) -> QualifiedRequest {
-    QualifiedRequest::Set(self)
-  }
-}
-impl Request for Set {
-  type Response = ();
-}
+  Play() -> ();
+  Pause() -> ();
+  StopPlayback() -> ();
+  TogglePlayback() -> ();
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LoadTracks {
-  pub paths: Vec<PathBuf>,
-  pub position: InsertPosition,
-}
-impl LoadTracks {
-  pub fn new(paths: Vec<PathBuf>, position: InsertPosition) -> Self {
-    Self { paths, position }
-  }
-}
-impl SealedRequest for LoadTracks {
-  fn qualified_request(self) -> QualifiedRequest {
-    QualifiedRequest::LoadTrack(self)
-  }
-}
-impl Request for LoadTracks {
-  type Response = Vec<(PathBuf, String)>;
-}
+  SetVolume(f32) -> ();
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Seek {
-  pub seek_position: SeekPosition,
-}
-impl Seek {
-  pub fn new(seek_position: SeekPosition) -> Self {
-    Self { seek_position }
-  }
-}
-impl SealedRequest for Seek {
-  fn qualified_request(self) -> QualifiedRequest {
-    QualifiedRequest::Seek(self)
-  }
-}
-impl Request for Seek {
-  type Response = ();
-}
+  SetLoopMode(LoopMode) -> ();
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+  Seek(SeekPosition) -> ();
 
-pub struct ClearTracks;
-impl SealedRequest for ClearTracks {
-  fn qualified_request(self) -> QualifiedRequest {
-    QualifiedRequest::ClearTracks(self)
-  }
-}
-impl Request for ClearTracks {
-  type Response = ();
+  ClearTracks() -> ();
+  LoadTracks(InsertPosition, Vec<PathBuf>) -> Vec<(PathBuf, String)>;
 }

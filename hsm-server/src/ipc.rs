@@ -14,7 +14,7 @@ use smol::{
 };
 use thiserror::Error;
 
-use crate::audio_server::message;
+use crate::audio_server::message::Message;
 
 #[derive(Debug, Error)]
 pub enum IpcServerError {
@@ -24,12 +24,12 @@ pub enum IpcServerError {
 
 pub struct IpcServer<'ex> {
   socket_path: PathBuf,
-  message_tx: Sender<message::Message>,
+  message_tx: Sender<Message>,
   ex: Arc<Executor<'ex>>,
 }
 
 impl<'ex> IpcServer<'ex> {
-  pub fn new(message_tx: Sender<message::Message>, ex: Arc<Executor<'ex>>) -> Self {
+  pub fn new(message_tx: Sender<Message>, ex: Arc<Executor<'ex>>) -> Self {
     Self {
       socket_path: PathBuf::from(hsm_ipc::socket_path()),
       message_tx,
@@ -76,11 +76,11 @@ impl<'ex> Drop for IpcServer<'ex> {
 }
 
 struct StreamHandler {
-  message_tx: Sender<message::Message>,
+  message_tx: Sender<Message>,
 }
 
 impl StreamHandler {
-  fn new(message_tx: Sender<message::Message>) -> Self {
+  fn new(message_tx: Sender<Message>) -> Self {
     Self { message_tx }
   }
 
@@ -100,6 +100,14 @@ impl StreamHandler {
 
     Ok(())
   }
+
+  async fn try_send_message(&self, message: Message) -> Result<(), String> {
+    self
+      .message_tx
+      .send(message)
+      .await
+      .map_err(|e| e.to_string())
+  }
 }
 
 impl RequestHandler for StreamHandler {
@@ -107,56 +115,59 @@ impl RequestHandler for StreamHandler {
     Ok(responses::Version(hsm_ipc::version()))
   }
 
-  async fn handle_playback(&self, request: requests::Playback) -> Reply<requests::Playback> {
-    use crate::audio_server::message::Message;
-    use hsm_ipc::requests::Playback;
-
-    let message = match request {
-      Playback::Play => Message::Play,
-      Playback::Pause => Message::Pause,
-      Playback::Toggle => Message::Toggle,
-      Playback::Stop => Message::Stop,
-    };
-
-    self
-      .message_tx
-      .send(message)
-      .await
-      .map_err(|e| e.to_string())
+  async fn handle_play(&self, _request: requests::Play) -> Reply<requests::Play> {
+    self.try_send_message(Message::Play).await
   }
 
-  async fn handle_set(&self, request: requests::Set) -> Reply<requests::Set> {
-    use crate::audio_server::message::Message;
-    use hsm_ipc::requests::Set;
-
-    let message = match request {
-      Set::Volume(volume) => Message::SetVolume(volume),
-      Set::LoopMode(loop_mode) => Message::SetLoopMode(loop_mode),
-    };
-
-    self
-      .message_tx
-      .send(message)
-      .await
-      .map_err(|e| e.to_string())
+  async fn handle_pause(&self, _request: requests::Pause) -> Reply<requests::Pause> {
+    self.try_send_message(Message::Pause).await
   }
 
-  async fn handle_insert_track(
+  async fn handle_stop_playback(
     &self,
-    request: requests::LoadTracks,
-  ) -> Reply<requests::LoadTracks> {
-    use crate::audio_server::message::Message;
+    _request: requests::StopPlayback,
+  ) -> Reply<requests::StopPlayback> {
+    self.try_send_message(Message::Stop).await
+  }
 
+  async fn handle_toggle_playback(
+    &self,
+    _request: requests::TogglePlayback,
+  ) -> Reply<requests::TogglePlayback> {
+    self.try_send_message(Message::Toggle).await
+  }
+
+  async fn handle_set_volume(&self, request: requests::SetVolume) -> Reply<requests::SetVolume> {
+    self.try_send_message(Message::SetVolume(request.0)).await
+  }
+
+  async fn handle_set_loop_mode(
+    &self,
+    request: requests::SetLoopMode,
+  ) -> Reply<requests::SetLoopMode> {
+    self.try_send_message(Message::SetLoopMode(request.0)).await
+  }
+
+  async fn handle_seek(&self, request: requests::Seek) -> Reply<requests::Seek> {
+    self.try_send_message(Message::Seek(request.0)).await
+  }
+
+  async fn handle_clear_tracks(
+    &self,
+    _request: requests::ClearTracks,
+  ) -> Reply<requests::ClearTracks> {
+    self.try_send_message(Message::ClearTracks).await
+  }
+
+  async fn handle_load_tracks(&self, request: requests::LoadTracks) -> Reply<requests::LoadTracks> {
     let (tx, rx) = oneshot::oneshot();
     self
-      .message_tx
-      .send(Message::InsertTracks {
-        paths: request.paths,
-        position: request.position,
+      .try_send_message(Message::InsertTracks {
+        position: request.0,
+        paths: request.1,
         error_tx: tx,
       })
-      .await
-      .map_err(|e| e.to_string())?;
+      .await?;
 
     let errors = rx.await.map_err(Self::oneshot_closed_error)?;
     Ok(
@@ -165,28 +176,5 @@ impl RequestHandler for StreamHandler {
         .map(|(path, error)| (path, error.to_string()))
         .collect(),
     )
-  }
-
-  async fn handle_seek(&self, request: requests::Seek) -> Reply<requests::Seek> {
-    use crate::audio_server::message::Message;
-
-    self
-      .message_tx
-      .send(Message::Seek(request.seek_position))
-      .await
-      .map_err(|e| e.to_string())
-  }
-
-  async fn handle_clear_tracks(
-    &self,
-    _request: requests::ClearTracks,
-  ) -> Reply<requests::ClearTracks> {
-    use crate::audio_server::message::Message;
-
-    self
-      .message_tx
-      .send(Message::ClearTracks)
-      .await
-      .map_err(|e| e.to_string())
   }
 }

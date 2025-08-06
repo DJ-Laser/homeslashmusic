@@ -8,3 +8,4 @@ git-version.workspace = true
 rustix.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+paste.workspace = true
