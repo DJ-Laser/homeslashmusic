@@ -173,6 +173,7 @@ impl Player {
     let num_tracks = self.track_list.lock().await.len();
     let current_track_index = self.get_shuffled_index().await;
     if num_tracks == 0 {
+      *self.shuffle_order.lock().await = Some(Vec::new());
       return Ok(());
     }
 
@@ -344,8 +345,16 @@ impl Player {
       self.clear_tracks().await?;
     }
 
+    let shuffle = self.shuffle().await;
     let mut tracks = self.track_list.lock().await;
-    let current_index = self.current_index.load(Ordering::Acquire);
+
+    // If shuffle is enabled, don't do relative insertion and default to end
+    let current_index = if !shuffle {
+      self.current_index.load(Ordering::Acquire)
+    } else {
+      tracks.len()
+    };
+
     let mut track_index = position.get_absolute(current_index, tracks.len());
 
     let current_track_changed = matches!(position, InsertPosition::Relative(0));
@@ -363,6 +372,10 @@ impl Player {
 
     // Drop tracks lock to prevent deadlock
     mem::drop(tracks);
+
+    if shuffle {
+      self.shuffle_tracks().await?;
+    }
 
     if current_track_changed
       && !matches!(
