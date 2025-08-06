@@ -9,6 +9,7 @@ pub enum Query {
   PlaybackState(oneshot::Sender<PlaybackState>),
   LoopMode(oneshot::Sender<LoopMode>),
   Volume(oneshot::Sender<f32>),
+  Shuffle(oneshot::Sender<bool>),
   Position(oneshot::Sender<Duration>),
   CurrentTrack(oneshot::Sender<Option<Arc<Track>>>),
 }
@@ -20,6 +21,7 @@ pub enum Message {
   Stop,
   SetLoopMode(LoopMode),
   SetVolume(f32),
+  SetShuffle(bool),
   Seek(SeekPosition),
   InsertTracks {
     paths: Vec<PathBuf>,

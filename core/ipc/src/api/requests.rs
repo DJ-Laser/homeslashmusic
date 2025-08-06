@@ -81,9 +81,11 @@ requests! {
   StopPlayback() -> ();
   TogglePlayback() -> ();
 
-  SetVolume(f32) -> ();
-
   SetLoopMode(LoopMode) -> ();
+
+  SetShuffle(bool) -> ();
+
+  SetVolume(f32) -> ();
 
   Seek(SeekPosition) -> ();
 

@@ -60,9 +60,11 @@ fn handle_command(command: Cli) -> Result<(), crate::Error> {
     Command::PlayPause => send_request(requests::TogglePlayback)?,
     Command::Stop => send_request(requests::StopPlayback)?,
 
-    Command::Volume { volume } => send_request(requests::SetVolume(volume))?,
     Command::Loop { loop_mode } => send_request(requests::SetLoopMode(loop_mode.into()))?,
-    Command::Seek { seek_position } => send_request(requests::Seek(seek_position.0))?,
+    Command::Shuffle { shuffle } => send_request(requests::SetShuffle(shuffle.into()))?,
+    Command::Volume { volume } => send_request(requests::SetVolume(volume))?,
+
+    Command::Seek { seek_position } => send_request(requests::Seek(seek_position))?,
 
     Command::Queue { command, tracks } => {
       if let Some(command) = command {

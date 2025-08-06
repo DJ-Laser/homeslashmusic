@@ -1,6 +1,7 @@
-use std::{num::ParseFloatError, path::PathBuf, str::FromStr, time::Duration};
+use std::{num::ParseFloatError, path::PathBuf, time::Duration};
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use hsm_ipc::SeekPosition;
 
 #[derive(Debug, Parser)]
 pub struct Cli {
@@ -25,7 +26,12 @@ pub enum Command {
   Loop {
     loop_mode: LoopMode,
   },
+  Shuffle {
+    shuffle: ShuffleMode,
+  },
+
   Seek {
+    #[arg(value_parser = parse_seek_position)]
     #[arg(allow_negative_numbers = true)]
     seek_position: SeekPosition,
   },
@@ -66,45 +72,48 @@ pub struct TrackPaths {
 #[derive(Debug, Clone, ValueEnum)]
 pub enum LoopMode {
   Off,
-  #[value(alias = "on")]
+  #[value(alias = "one")]
   Track,
+  #[value(aliases = ["on", "all"])]
   Playlist,
 }
 
 impl Into<hsm_ipc::LoopMode> for LoopMode {
   fn into(self) -> hsm_ipc::LoopMode {
     match self {
-      LoopMode::Off => hsm_ipc::LoopMode::None,
-      LoopMode::Track => hsm_ipc::LoopMode::Track,
-      LoopMode::Playlist => hsm_ipc::LoopMode::Playlist,
+      Self::Off => hsm_ipc::LoopMode::None,
+      Self::Track => hsm_ipc::LoopMode::Track,
+      Self::Playlist => hsm_ipc::LoopMode::Playlist,
     }
   }
 }
 
-#[derive(Debug, Clone)]
-pub struct SeekPosition(pub hsm_ipc::SeekPosition);
+#[derive(Debug, Clone, ValueEnum)]
+pub enum ShuffleMode {
+  Off,
+  On,
+}
 
-impl FromStr for SeekPosition {
-  type Err = ParseFloatError;
-
-  fn from_str(s: &str) -> Result<Self, Self::Err> {
-    if let Some(s) = s.strip_prefix("+") {
-      let secs: f64 = s.parse()?;
-      return Ok(Self(hsm_ipc::SeekPosition::Forward(
-        Duration::from_secs_f64(secs),
-      )));
+impl Into<bool> for ShuffleMode {
+  fn into(self) -> bool {
+    match self {
+      Self::Off => false,
+      Self::On => true,
     }
-
-    if let Some(s) = s.strip_prefix("-") {
-      let secs: f64 = s.parse()?;
-      return Ok(Self(hsm_ipc::SeekPosition::Backward(
-        Duration::from_secs_f64(secs),
-      )));
-    }
-
-    let secs: f64 = s.parse()?;
-    Ok(Self(hsm_ipc::SeekPosition::To(Duration::from_secs_f64(
-      secs,
-    ))))
   }
+}
+
+fn parse_seek_position(s: &str) -> Result<SeekPosition, ParseFloatError> {
+  if let Some(s) = s.strip_prefix("+") {
+    let secs: f64 = s.parse()?;
+    return Ok(SeekPosition::Forward(Duration::from_secs_f64(secs)));
+  }
+
+  if let Some(s) = s.strip_prefix("-") {
+    let secs: f64 = s.parse()?;
+    return Ok(SeekPosition::Backward(Duration::from_secs_f64(secs)));
+  }
+
+  let secs: f64 = s.parse()?;
+  Ok(SeekPosition::To(Duration::from_secs_f64(secs)))
 }

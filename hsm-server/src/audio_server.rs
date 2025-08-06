@@ -99,6 +99,7 @@ impl AudioServer {
     let _ = match query {
       Query::PlaybackState(mut tx) => tx.send(self.player.playback_state()),
       Query::LoopMode(mut tx) => tx.send(self.player.loop_mode()),
+      Query::Shuffle(mut tx) => tx.send(self.player.shuffle()),
       Query::Volume(mut tx) => tx.send(self.player.volume().await),
       Query::Position(mut tx) => tx.send(self.player.position().await),
       Query::CurrentTrack(mut tx) => tx.send(self.player.current_track().await),
@@ -113,6 +114,7 @@ impl AudioServer {
       Message::Stop => self.player.stop().await?,
 
       Message::SetLoopMode(loop_mode) => self.player.set_loop_mode(loop_mode).await?,
+      Message::SetShuffle(shuffle) => self.player.set_shuffle(shuffle).await?,
       Message::SetVolume(volume) => self.player.set_volume(volume).await?,
 
       Message::Seek(seek_position) => self

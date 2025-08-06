@@ -214,11 +214,14 @@ impl PlayerInterface for MprisImpl {
   }
 
   async fn shuffle(&self) -> fdo::Result<bool> {
-    Ok(false)
+    self.try_query(Query::Shuffle).await
   }
 
-  async fn set_shuffle(&self, _shuffle: bool) -> zbus::Result<()> {
-    Self::unsupported_set("SetShuffle is not supported")
+  async fn set_shuffle(&self, shuffle: bool) -> zbus::Result<()> {
+    self
+      .try_send(Message::SetShuffle(shuffle))
+      .await
+      .map_err(zbus::Error::from)
   }
 
   async fn metadata(&self) -> fdo::Result<Metadata> {

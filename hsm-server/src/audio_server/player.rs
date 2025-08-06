@@ -2,7 +2,7 @@ use std::{
   mem,
   sync::{
     Arc,
-    atomic::{AtomicUsize, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
   },
   time::Duration,
 };
@@ -79,6 +79,7 @@ impl PlayerError {
 pub struct Player {
   track_list: Mutex<Vec<Arc<Track>>>,
   current_index: AtomicUsize,
+  shuffle: AtomicBool,
 
   controls: Arc<Controls>,
   event_tx: Sender<Event>,
@@ -99,6 +100,8 @@ impl Player {
     let player = Self {
       track_list: Mutex::new(Vec::new()),
       current_index: AtomicUsize::new(0),
+      shuffle: AtomicBool::new(true),
+
       controls: Arc::new(Controls::new()),
       event_tx,
       source_tx,
@@ -212,6 +215,19 @@ impl Player {
     self.clear_source_queue().await;
     self.set_playback_state(PlaybackState::Stopped)?;
     *self.controls.position.lock().await = Duration::ZERO;
+    Ok(())
+  }
+
+  pub fn shuffle(&self) -> bool {
+    self.shuffle.load(Ordering::Relaxed)
+  }
+
+  pub async fn set_shuffle(&self, shuffle: bool) -> Result<(), PlayerError> {
+    let prev_shuffle = self.shuffle.swap(shuffle, Ordering::Relaxed);
+    if shuffle != prev_shuffle {
+      self.emit(Event::ShuffleChanged(shuffle))?;
+    }
+
     Ok(())
   }
 

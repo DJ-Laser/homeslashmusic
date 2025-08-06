@@ -6,6 +6,7 @@ use hsm_ipc::{LoopMode, PlaybackState};
 pub enum Event {
   PlaybackStateChanged(PlaybackState),
   LoopModeChanged(LoopMode),
+  ShuffleChanged(bool),
   VolumeChanged(f32),
   Seeked(Duration),
 }

@@ -137,15 +137,19 @@ impl RequestHandler for StreamHandler {
     self.try_send_message(Message::Toggle).await
   }
 
-  async fn handle_set_volume(&self, request: requests::SetVolume) -> Reply<requests::SetVolume> {
-    self.try_send_message(Message::SetVolume(request.0)).await
-  }
-
   async fn handle_set_loop_mode(
     &self,
     request: requests::SetLoopMode,
   ) -> Reply<requests::SetLoopMode> {
     self.try_send_message(Message::SetLoopMode(request.0)).await
+  }
+
+  async fn handle_set_shuffle(&self, request: requests::SetShuffle) -> Reply<requests::SetVolume> {
+    self.try_send_message(Message::SetShuffle(request.0)).await
+  }
+
+  async fn handle_set_volume(&self, request: requests::SetVolume) -> Reply<requests::SetVolume> {
+    self.try_send_message(Message::SetVolume(request.0)).await
   }
 
   async fn handle_seek(&self, request: requests::Seek) -> Reply<requests::Seek> {

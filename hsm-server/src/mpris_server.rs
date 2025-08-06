@@ -53,6 +53,12 @@ impl MprisServer {
           .properties_changed([Property::LoopStatus(loop_status(loop_mode))])
           .await?;
       }
+      Event::ShuffleChanged(shuffle) => {
+        self
+          .server
+          .properties_changed([Property::Shuffle(shuffle)])
+          .await?;
+      }
       Event::VolumeChanged(volume) => {
         self
           .server
