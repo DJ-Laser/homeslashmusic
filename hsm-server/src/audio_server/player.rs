@@ -100,7 +100,7 @@ impl Player {
     let player = Self {
       track_list: Mutex::new(Vec::new()),
       current_index: AtomicUsize::new(0),
-      shuffle: AtomicBool::new(true),
+      shuffle: AtomicBool::new(false),
 
       controls: Arc::new(Controls::new()),
       event_tx,
@@ -164,6 +164,7 @@ impl Player {
       .swap(new_state, Ordering::Relaxed);
     if prev_state != new_state {
       self.emit(Event::PlaybackStateChanged(new_state))?;
+      println!("Setting playback state to {new_state:?}")
     }
 
     Ok(prev_state)
@@ -186,16 +187,11 @@ impl Player {
   }
 
   pub async fn pause(&self) -> Result<(), PlayerError> {
-    // Don't un-stop playback on pause
-    let prev_state = self.controls.playback_state.compare_exchange(
-      PlaybackState::Playing,
-      PlaybackState::Paused,
-      Ordering::Relaxed,
-      Ordering::Relaxed,
-    );
+    let prev_state = self.controls.playback_state.load(Ordering::Acquire);
 
-    if let Ok(_) = prev_state {
-      self.emit(Event::PlaybackStateChanged(PlaybackState::Paused))?;
+    // Don't un-stop playback on pause
+    if matches!(prev_state, PlaybackState::Playing) {
+      self.set_playback_state(PlaybackState::Paused)?;
     }
 
     Ok(())
@@ -226,6 +222,7 @@ impl Player {
     let prev_shuffle = self.shuffle.swap(shuffle, Ordering::Relaxed);
     if shuffle != prev_shuffle {
       self.emit(Event::ShuffleChanged(shuffle))?;
+      println!("Shuffle set to {shuffle}");
     }
 
     Ok(())
@@ -239,6 +236,7 @@ impl Player {
     let prev_mode = self.controls.loop_mode.swap(loop_mode, Ordering::Relaxed);
     if loop_mode != prev_mode {
       self.emit(Event::LoopModeChanged(loop_mode))?;
+      println!("Loop mode set to {loop_mode:?}");
     }
 
     Ok(())
@@ -259,6 +257,7 @@ impl Player {
 
     if clamped_volume != prev_volume {
       self.emit(Event::VolumeChanged(clamped_volume))?;
+      println!("volume set to {volume:?}");
     }
 
     Ok(())
@@ -279,7 +278,10 @@ impl Player {
     let (tx, rx) = oneshot::oneshot();
     *self.controls.seek_position.lock().await = Some((seek_position, tx));
 
-    rx.await.map_err(|_| SeekError::ErrorChannelClosed)?
+    rx.await.map_err(|_| SeekError::ErrorChannelClosed)??;
+    println!("Seeked {seek_position:?}");
+
+    Ok(())
   }
 
   pub async fn current_track(&self) -> Option<Arc<Track>> {
@@ -334,6 +336,7 @@ impl Player {
     self.stop().await?;
     *self.track_list.lock().await = Vec::new();
     self.current_index.store(0, Ordering::Release);
+    println!("Clearing track list");
 
     Ok(())
   }
@@ -376,7 +379,6 @@ impl Player {
 
       if event.indicates_end() {
         if !matches!(event, SourceEvent::Skipped) {
-          println!("Current track ended, loading next");
           if let Err(error) = self.play_next_track().await {
             if error.is_recoverable() {
               eprintln!("{error}");
