@@ -2,7 +2,7 @@ use std::{
   mem,
   sync::{
     Arc,
-    atomic::{AtomicBool, AtomicUsize, Ordering},
+    atomic::{AtomicUsize, Ordering},
   },
   time::Duration,
 };
@@ -12,6 +12,7 @@ use controlled_source::{SeekError, SourceEvent, wrap_source};
 use decoder::TrackDecoder;
 use hsm_ipc::{InsertPosition, LoopMode, PlaybackState, SeekPosition, Track};
 use output::NextSourceState;
+use rand::seq::SliceRandom;
 use rodio::{Source, mixer::Mixer};
 use smol::{
   channel::{self, Receiver, Sender},
@@ -65,12 +66,16 @@ pub enum PlayerError {
 
   #[error("Failed to load track: {0}")]
   LoadTrack(#[from] LoadTrackError),
+
+  #[error("Shuffle failed, could not determine new current track position")]
+  ShuffleFailedNoCurrentTrack,
 }
 
 impl PlayerError {
   pub fn is_recoverable(&self) -> bool {
     match self {
-      PlayerError::LoadTrack(_) => true,
+      Self::LoadTrack(_) => true,
+      Self::ShuffleFailedNoCurrentTrack => true,
       _ => false,
     }
   }
@@ -79,7 +84,7 @@ impl PlayerError {
 pub struct Player {
   track_list: Mutex<Vec<Arc<Track>>>,
   current_index: AtomicUsize,
-  shuffle: AtomicBool,
+  shuffle_order: Mutex<Option<Vec<usize>>>,
 
   controls: Arc<Controls>,
   event_tx: Sender<Event>,
@@ -100,7 +105,7 @@ impl Player {
     let player = Self {
       track_list: Mutex::new(Vec::new()),
       current_index: AtomicUsize::new(0),
-      shuffle: AtomicBool::new(false),
+      shuffle_order: Mutex::new(None),
 
       controls: Arc::new(Controls::new()),
       event_tx,
@@ -139,6 +144,17 @@ impl Player {
     Ok(())
   }
 
+  async fn get_shuffled_index(&self) -> usize {
+    let current_index = self.current_index.load(Ordering::Acquire);
+    self
+      .shuffle_order
+      .lock()
+      .await
+      .as_ref()
+      .and_then(|order| order.get(current_index).cloned())
+      .unwrap_or(current_index)
+  }
+
   /// Returns true if there was a current track to queue
   async fn requeue_current_track(&self) -> Result<bool, LoadTrackError> {
     self.clear_source_queue().await;
@@ -147,10 +163,34 @@ impl Player {
       return Ok(false);
     }
 
-    let current_index = self.current_index.load(Ordering::Acquire);
-    self.queue_track(&tracks[current_index]).await?;
+    let track_index = self.get_shuffled_index().await;
+    self.queue_track(&tracks[track_index]).await?;
 
     Ok(true)
+  }
+
+  async fn shuffle_tracks(&self) -> Result<(), PlayerError> {
+    let num_tracks = self.track_list.lock().await.len();
+    let current_track_index = self.get_shuffled_index().await;
+    if num_tracks == 0 {
+      return Ok(());
+    }
+
+    let mut shuffle_order: Vec<_> = (0..num_tracks).collect();
+    shuffle_order.shuffle(&mut rand::rng());
+
+    let new_current_index = shuffle_order
+      .iter()
+      .position(|track_index| *track_index == current_track_index)
+      .ok_or(PlayerError::ShuffleFailedNoCurrentTrack)?;
+    self
+      .current_index
+      .store(new_current_index, Ordering::Release);
+
+    *self.shuffle_order.lock().await = Some(shuffle_order);
+    println!("Shuffled track order");
+
+    Ok(())
   }
 
   pub fn playback_state(&self) -> PlaybackState {
@@ -214,13 +254,17 @@ impl Player {
     Ok(())
   }
 
-  pub fn shuffle(&self) -> bool {
-    self.shuffle.load(Ordering::Relaxed)
+  pub async fn shuffle(&self) -> bool {
+    self.shuffle_order.lock().await.is_some()
   }
 
   pub async fn set_shuffle(&self, shuffle: bool) -> Result<(), PlayerError> {
-    let prev_shuffle = self.shuffle.swap(shuffle, Ordering::Relaxed);
+    let prev_shuffle = self.shuffle_order.lock().await.take().is_some();
     if shuffle != prev_shuffle {
+      if shuffle {
+        self.shuffle_tracks().await?;
+      }
+
       self.emit(Event::ShuffleChanged(shuffle))?;
       println!("Shuffle set to {shuffle}");
     }
@@ -228,7 +272,7 @@ impl Player {
     Ok(())
   }
 
-  pub fn loop_mode(&self) -> LoopMode {
+  pub async fn loop_mode(&self) -> LoopMode {
     self.controls.loop_mode.load(Ordering::Relaxed)
   }
 
@@ -286,8 +330,8 @@ impl Player {
 
   pub async fn current_track(&self) -> Option<Arc<Track>> {
     let tracks = self.track_list.lock().await;
-    let current_index = self.current_index.load(Ordering::Acquire);
-    tracks.get(current_index).map(|track| track.clone())
+    let track_index = self.get_shuffled_index().await;
+    tracks.get(track_index).map(|track| track.clone())
   }
 
   /// Inserts new tracks at a specified position in the track list

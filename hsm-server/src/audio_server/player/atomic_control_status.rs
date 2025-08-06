@@ -4,6 +4,7 @@ use hsm_ipc::{LoopMode, PlaybackState};
 
 pub struct AtomicPlaybackState(AtomicUsize);
 
+#[allow(dead_code)]
 impl AtomicPlaybackState {
   fn from_usize(val: usize) -> PlaybackState {
     #![allow(non_upper_case_globals)]
