@@ -40,16 +40,7 @@ impl InsertPosition {
   pub fn get_absolute(&self, current_position: usize, track_list_len: usize) -> usize {
     let position = match self {
       InsertPosition::Absolute(position) => *position,
-      InsertPosition::Relative(delta) => {
-        if *delta == 0 {
-          current_position
-        } else if delta.is_negative() {
-          // Inserting at relative 0 inserts before current
-          current_position.saturating_sub((delta.abs() - 1) as usize)
-        } else {
-          current_position.saturating_add(delta.abs() as usize)
-        }
-      }
+      InsertPosition::Relative(delta) => current_position.saturating_add_signed(*delta),
       InsertPosition::Start => 0,
       InsertPosition::End => track_list_len,
       InsertPosition::Replace => 0,
