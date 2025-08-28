@@ -259,29 +259,34 @@ impl Player {
     Ok(())
   }
 
-  async fn stop_or_wrap_track(
-    &self,
-    tracks: &Vec<Arc<Track>>,
-    reverse: bool,
-  ) -> Result<(), PlayerError> {
+  async fn stop_or_wrap_track(&self, reverse: bool) -> Result<(), PlayerError> {
     let printed_position = if reverse { "beginning" } else { "end" };
     let printed_loop_position = if reverse { "end" } else { "beginning" };
 
-    let new_index = if reverse { tracks.len() - 1 } else { 0 };
+    let tracks = self.track_list.lock().await;
+    let should_loop = !matches!(
+      self.controls.loop_mode.load(Ordering::Acquire),
+      LoopMode::None
+    );
+
+    // Don't skip to end if loop is off
+    let new_index = if should_loop && reverse {
+      tracks.len() - 1
+    } else {
+      0
+    };
 
     self.current_index.store(new_index, Ordering::Release);
 
-    if tracks.len() == 0
-      || !matches!(
-        self.controls.loop_mode.load(Ordering::Acquire),
-        LoopMode::Playlist
-      )
-    {
+    if !should_loop || tracks.len() == 0 {
       println!("Track list reached {printed_position}, stopping");
       self.stop().await?;
     } else {
       println!("Track list reached {printed_position}, looping to {printed_loop_position}");
-      self.queue_track(&tracks[new_index]).await?;
+
+      // Drop tracks guard to prevent deadlock
+      mem::drop(tracks);
+      self.requeue_current_track().await?;
     };
 
     Ok(())
@@ -290,12 +295,14 @@ impl Player {
   pub async fn go_to_next_track(&self) -> Result<(), PlayerError> {
     let tracks = self.track_list.lock().await;
     let new_index = 1 + self.current_index.fetch_add(1, Ordering::Release);
+    let wrap_needed = new_index >= tracks.len();
 
-    if new_index >= tracks.len() {
-      self.stop_or_wrap_track(&tracks, false).await?;
+    // Drop tracks guard to prevent deadlock
+    mem::drop(tracks);
+
+    if wrap_needed {
+      self.stop_or_wrap_track(false).await?;
     } else {
-      // Drop tracks guard to prevent deadlock
-      mem::drop(tracks);
       self.requeue_current_track().await?;
     }
 
@@ -309,15 +316,13 @@ impl Player {
       self.seek(SeekPosition::To(Duration::ZERO)).await
     } else {
       let current_index = self.current_index.load(Ordering::Acquire);
-      let new_index = current_index.saturating_sub(1);
-      self.current_index.store(new_index, Ordering::Release);
 
       if current_index == 0 {
-        self.current_index.store(0, Ordering::Release);
-
-        let tracks = self.track_list.lock().await;
-        self.stop_or_wrap_track(&tracks, true).await?;
+        self.stop_or_wrap_track(true).await?;
       } else {
+        self
+          .current_index
+          .store(current_index - 1, Ordering::Release);
         self.requeue_current_track().await?;
       }
 
