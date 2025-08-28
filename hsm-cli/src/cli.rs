@@ -20,6 +20,10 @@ pub enum Command {
   PlayPause,
   Stop,
 
+  Next,
+  #[command(alias = "prev")]
+  Previous,
+
   Volume {
     volume: f32,
   },

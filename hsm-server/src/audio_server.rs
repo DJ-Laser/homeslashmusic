@@ -113,15 +113,14 @@ impl AudioServer {
       Message::Toggle => self.player.toggle_playback().await?,
       Message::Stop => self.player.stop().await?,
 
+      Message::NextTrack => self.player.go_to_next_track().await?,
+      Message::PreviousTrack { soft } => self.player.go_to_previous_track(soft).await?,
+
       Message::SetLoopMode(loop_mode) => self.player.set_loop_mode(loop_mode).await?,
       Message::SetShuffle(shuffle) => self.player.set_shuffle(shuffle).await?,
       Message::SetVolume(volume) => self.player.set_volume(volume).await?,
 
-      Message::Seek(seek_position) => self
-        .player
-        .seek(seek_position)
-        .await
-        .unwrap_or_else(|error| eprintln!("Failed to seek: {}", error)),
+      Message::Seek(seek_position) => self.player.seek(seek_position).await?,
 
       Message::InsertTracks {
         paths,

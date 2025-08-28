@@ -69,12 +69,16 @@ pub enum PlayerError {
 
   #[error("Shuffle failed, could not determine new current track position")]
   ShuffleFailedNoCurrentTrack,
+
+  #[error("failed to seek: ")]
+  SeekFailed(#[from] SeekError),
 }
 
 impl PlayerError {
   pub fn is_recoverable(&self) -> bool {
     match self {
       Self::LoadTrack(_) => true,
+      Self::SeekFailed(_) => true,
       Self::ShuffleFailedNoCurrentTrack => true,
       _ => false,
     }
@@ -255,6 +259,72 @@ impl Player {
     Ok(())
   }
 
+  async fn stop_or_wrap_track(
+    &self,
+    tracks: &Vec<Arc<Track>>,
+    reverse: bool,
+  ) -> Result<(), PlayerError> {
+    let printed_position = if reverse { "beginning" } else { "end" };
+    let printed_loop_position = if reverse { "end" } else { "beginning" };
+
+    let new_index = if reverse { tracks.len() - 1 } else { 0 };
+
+    self.current_index.store(new_index, Ordering::Release);
+
+    if tracks.len() == 0
+      || !matches!(
+        self.controls.loop_mode.load(Ordering::Acquire),
+        LoopMode::Playlist
+      )
+    {
+      println!("Track list reached {printed_position}, stopping");
+      self.stop().await?;
+    } else {
+      println!("Track list reached {printed_position}, looping to {printed_loop_position}");
+      self.queue_track(&tracks[new_index]).await?;
+    };
+
+    Ok(())
+  }
+
+  pub async fn go_to_next_track(&self) -> Result<(), PlayerError> {
+    let tracks = self.track_list.lock().await;
+    let new_index = 1 + self.current_index.fetch_add(1, Ordering::Release);
+
+    if new_index >= tracks.len() {
+      self.stop_or_wrap_track(&tracks, false).await?;
+    } else {
+      // Drop tracks guard to prevent deadlock
+      mem::drop(tracks);
+      self.requeue_current_track().await?;
+    }
+
+    Ok(())
+  }
+
+  pub async fn go_to_previous_track(&self, soft: bool) -> Result<(), PlayerError> {
+    const RESTART_THRESHOLD: Duration = Duration::from_secs(5);
+
+    if soft && self.position().await > RESTART_THRESHOLD {
+      self.seek(SeekPosition::To(Duration::ZERO)).await
+    } else {
+      let current_index = self.current_index.load(Ordering::Acquire);
+      let new_index = current_index.saturating_sub(1);
+      self.current_index.store(new_index, Ordering::Release);
+
+      if current_index == 0 {
+        self.current_index.store(0, Ordering::Release);
+
+        let tracks = self.track_list.lock().await;
+        self.stop_or_wrap_track(&tracks, true).await?;
+      } else {
+        self.requeue_current_track().await?;
+      }
+
+      Ok(())
+    }
+  }
+
   pub async fn shuffle(&self) -> bool {
     self.shuffle_order.lock().await.is_some()
   }
@@ -312,7 +382,7 @@ impl Player {
     *self.controls.position.lock().await
   }
 
-  pub async fn seek(&self, seek_position: SeekPosition) -> Result<(), SeekError> {
+  pub async fn seek(&self, seek_position: SeekPosition) -> Result<(), PlayerError> {
     if matches!(
       *self.controls.next_source.lock().await,
       NextSourceState::None
@@ -398,34 +468,6 @@ impl Player {
     Ok(())
   }
 
-  pub async fn play_next_track(&self) -> Result<(), PlayerError> {
-    let tracks = self.track_list.lock().await;
-    let new_index = 1 + self.current_index.fetch_add(1, Ordering::Release);
-
-    if new_index >= tracks.len() {
-      self.current_index.store(0, Ordering::Release);
-
-      if tracks.len() == 0
-        || !matches!(
-          self.controls.loop_mode.load(Ordering::Acquire),
-          LoopMode::Playlist
-        )
-      {
-        println!("Track list reached end, stopping");
-        self.stop().await?;
-      } else {
-        println!("Track list reached end, looping to start");
-        self.queue_track(&tracks[0]).await?;
-      };
-    } else {
-      // Drop tracks guard to prevent deadlock
-      mem::drop(tracks);
-      self.requeue_current_track().await?;
-    }
-
-    Ok(())
-  }
-
   pub async fn run(&self) -> Result<(), PlayerError> {
     loop {
       let event = self
@@ -436,7 +478,7 @@ impl Player {
 
       if event.indicates_end() {
         if !matches!(event, SourceEvent::Skipped) {
-          if let Err(error) = self.play_next_track().await {
+          if let Err(error) = self.go_to_next_track().await {
             if error.is_recoverable() {
               eprintln!("{error}");
             } else {

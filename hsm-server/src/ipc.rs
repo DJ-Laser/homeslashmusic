@@ -137,6 +137,19 @@ impl RequestHandler for StreamHandler {
     self.try_send_message(Message::Toggle).await
   }
 
+  async fn handle_next_track(&self, _request: requests::NextTrack) -> Reply<requests::NextTrack> {
+    self.try_send_message(Message::NextTrack).await
+  }
+
+  async fn handle_previous_track(
+    &self,
+    request: requests::PreviousTrack,
+  ) -> Reply<requests::PreviousTrack> {
+    self
+      .try_send_message(Message::PreviousTrack { soft: request.soft })
+      .await
+  }
+
   async fn handle_set_loop_mode(
     &self,
     request: requests::SetLoopMode,

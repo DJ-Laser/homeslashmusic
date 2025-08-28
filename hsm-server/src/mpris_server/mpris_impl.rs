@@ -106,11 +106,11 @@ impl RootInterface for MprisImpl {
 
 impl PlayerInterface for MprisImpl {
   async fn next(&self) -> fdo::Result<()> {
-    Self::unsupported("Next is not supported")
+    self.try_send(Message::NextTrack).await
   }
 
   async fn previous(&self) -> fdo::Result<()> {
-    Self::unsupported("Previous is not supported")
+    self.try_send(Message::PreviousTrack { soft: true }).await
   }
 
   async fn pause(&self) -> fdo::Result<()> {
@@ -262,11 +262,11 @@ impl PlayerInterface for MprisImpl {
   }
 
   async fn can_go_next(&self) -> fdo::Result<bool> {
-    Ok(false)
+    Ok(true)
   }
 
   async fn can_go_previous(&self) -> fdo::Result<bool> {
-    Ok(false)
+    Ok(true)
   }
 
   async fn can_play(&self) -> fdo::Result<bool> {

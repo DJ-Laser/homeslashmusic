@@ -81,6 +81,12 @@ requests! {
   StopPlayback() -> ();
   TogglePlayback() -> ();
 
+  NextTrack() -> ();
+  PreviousTrack {
+    /// Restarts the track instead of going to the previous track if enough time has passed
+    pub soft: bool,
+  } -> ();
+
   SetLoopMode(LoopMode) -> ();
 
   SetShuffle(bool) -> ();

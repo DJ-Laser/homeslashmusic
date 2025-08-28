@@ -60,6 +60,9 @@ fn handle_command(command: Cli) -> Result<(), crate::Error> {
     Command::PlayPause => send_request(requests::TogglePlayback)?,
     Command::Stop => send_request(requests::StopPlayback)?,
 
+    Command::Next => send_request(requests::NextTrack)?,
+    Command::Previous => send_request(requests::PreviousTrack { soft: true })?,
+
     Command::Loop { loop_mode } => send_request(requests::SetLoopMode(loop_mode.into()))?,
     Command::Shuffle { shuffle } => send_request(requests::SetShuffle(shuffle.into()))?,
     Command::Volume { volume } => send_request(requests::SetVolume(volume))?,

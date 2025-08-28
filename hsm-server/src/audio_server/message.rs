@@ -19,6 +19,11 @@ pub enum Message {
   Pause,
   Toggle,
   Stop,
+  NextTrack,
+  PreviousTrack {
+    /// Restarts the track instead of going to the previous track if enough time has passed
+    soft: bool,
+  },
   SetLoopMode(LoopMode),
   SetVolume(f32),
   SetShuffle(bool),
