@@ -1,4 +1,8 @@
-use std::{fs, path::PathBuf, sync::Arc};
+use std::{
+  fs,
+  path::{Path, PathBuf},
+  sync::Arc,
+};
 
 use async_oneshot as oneshot;
 use hsm_ipc::{
@@ -18,8 +22,16 @@ use crate::audio_server::message::Message;
 
 #[derive(Debug, Error)]
 pub enum IpcServerError {
-  #[error("Failed to create ipc socket at {path}")]
-  FailedToCreateSocket { path: PathBuf, source: io::Error },
+  #[error("Failed to check socket file: {0}")]
+  CheckSocketFileFailed(#[source] io::Error),
+
+  #[error(
+    "The homeslashmusic socket file was already present, is another `hsm-server` instance running?"
+  )]
+  SocketInUse,
+
+  #[error("Failed to create ipc socket: {0}")]
+  FailedToCreateSocket(#[source] io::Error),
 }
 
 pub struct IpcServer<'ex> {
@@ -29,21 +41,27 @@ pub struct IpcServer<'ex> {
 }
 
 impl<'ex> IpcServer<'ex> {
-  pub fn new(message_tx: Sender<Message>, ex: Arc<Executor<'ex>>) -> Self {
-    Self {
-      socket_path: PathBuf::from(hsm_ipc::socket_path()),
+  fn is_socket_in_use(socket_path: &Path) -> Result<bool, IpcServerError> {
+    let socket_in_use = fs::exists(socket_path).map_err(IpcServerError::CheckSocketFileFailed)?;
+    Ok(socket_in_use)
+  }
+
+  pub fn new(message_tx: Sender<Message>, ex: Arc<Executor<'ex>>) -> Result<Self, IpcServerError> {
+    let socket_path = PathBuf::from(hsm_ipc::socket_path());
+    if Self::is_socket_in_use(&socket_path)? {
+      return Err(IpcServerError::SocketInUse);
+    }
+
+    Ok(Self {
+      socket_path,
       message_tx,
       ex,
-    }
+    })
   }
 
   pub async fn run(&self) -> Result<(), IpcServerError> {
-    let listener = UnixListener::bind(&self.socket_path).map_err(|source| {
-      IpcServerError::FailedToCreateSocket {
-        path: self.socket_path.clone(),
-        source,
-      }
-    })?;
+    let listener =
+      UnixListener::bind(&self.socket_path).map_err(IpcServerError::FailedToCreateSocket)?;
 
     while let Some(stream) = listener.incoming().next().await {
       let message_tx = self.message_tx.clone();
@@ -64,14 +82,19 @@ impl<'ex> IpcServer<'ex> {
         .detach();
     }
 
+    self.cleanup_socket();
     unreachable!("Iterating over Incoming should never return None")
+  }
+
+  fn cleanup_socket(&self) {
+    let _ = fs::remove_file(&self.socket_path);
+    println!("Removing socket: {:?}", self.socket_path);
   }
 }
 
 impl<'ex> Drop for IpcServer<'ex> {
   fn drop(&mut self) {
-    let _ = fs::remove_file(&self.socket_path);
-    println!("Removing socket: {:?}", self.socket_path)
+    self.cleanup_socket();
   }
 }
 

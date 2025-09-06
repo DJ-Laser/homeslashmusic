@@ -25,7 +25,7 @@ fn main() {
     )
     .await
     .unwrap();
-    let ipc_server = IpcServer::new(message_tx.clone(), ex.clone());
+    let ipc_server = IpcServer::new(message_tx.clone(), ex.clone()).unwrap();
 
     (
       async move { ipc_server.run().await.unwrap() },
