@@ -4,7 +4,7 @@ use mpris_server::{
   PlayerInterface, RootInterface,
   zbus::{self, fdo},
 };
-use smol::channel::Sender;
+use smol::channel::{self, Sender};
 
 use crate::audio_server::message::{Message, Query};
 
@@ -15,11 +15,15 @@ use super::conversions::{
 
 pub struct MprisImpl {
   message_tx: Sender<Message>,
+  quit_tx: Sender<()>,
 }
 
 impl MprisImpl {
-  pub fn new(message_tx: Sender<Message>) -> Self {
-    Self { message_tx }
+  pub fn new(message_tx: channel::Sender<Message>, quit_tx: channel::Sender<()>) -> Self {
+    Self {
+      message_tx,
+      quit_tx,
+    }
   }
 
   fn unsupported<T>(message: &str) -> fdo::Result<T> {
@@ -55,7 +59,13 @@ impl RootInterface for MprisImpl {
   }
 
   async fn quit(&self) -> fdo::Result<()> {
-    todo!() // Will technically quit lol
+    match self.quit_tx.try_send(()) {
+      Ok(()) => Ok(()),
+      Err(channel::TrySendError::Closed(e)) => Err(Self::channel_closed_error(e)),
+
+      // If the channel is full, a quit message was already sent
+      Err(channel::TrySendError::Full(_)) => Ok(()),
+    }
   }
 
   async fn can_quit(&self) -> fdo::Result<bool> {
