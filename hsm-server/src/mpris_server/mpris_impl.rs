@@ -1,17 +1,17 @@
-use std::{path::PathBuf, time::Duration};
-
 use async_oneshot as oneshot;
-use hsm_ipc::{InsertPosition, LoopMode, SeekPosition};
+use hsm_ipc::{InsertPosition, SeekPosition};
 use mpris_server::{
-  LoopStatus, Metadata, PlaybackRate, PlaybackStatus, PlayerInterface, RootInterface, Time,
-  TrackId, Volume,
+  PlayerInterface, RootInterface,
   zbus::{self, fdo},
 };
 use smol::channel::Sender;
 
 use crate::audio_server::message::{Message, Query};
 
-use super::{loop_status, metadata, playback_status};
+use super::conversions::{
+  as_dbus_time, as_loop_status, as_playback_status, decode_file_url, from_dbus_time,
+  from_loop_status, generate_metadata,
+};
 
 pub struct MprisImpl {
   message_tx: Sender<Message>,
@@ -129,33 +129,35 @@ impl PlayerInterface for MprisImpl {
     self.try_send(Message::Play).await
   }
 
-  async fn seek(&self, offset: Time) -> fdo::Result<()> {
+  async fn seek(&self, offset: mpris_server::Time) -> fdo::Result<()> {
     if offset.is_zero() {
       return Ok(());
     }
 
     let seek_offset = if offset.is_positive() {
-      SeekPosition::Forward(Duration::from_micros(offset.as_micros() as u64))
+      SeekPosition::Forward(from_dbus_time(offset))
     } else {
-      SeekPosition::Backward(Duration::from_micros(offset.abs().as_micros() as u64))
+      SeekPosition::Backward(from_dbus_time(offset))
     };
 
     self.try_send(Message::Seek(seek_offset)).await
   }
 
-  async fn set_position(&self, _track_id: TrackId, position: Time) -> fdo::Result<()> {
+  async fn set_position(
+    &self,
+    _track_id: mpris_server::TrackId,
+    position: mpris_server::Time,
+  ) -> fdo::Result<()> {
     if position.is_negative() {
       return Ok(());
     }
 
-    let seek_position = SeekPosition::To(Duration::from_micros(position.as_micros() as u64));
+    let seek_position = SeekPosition::To(from_dbus_time(position));
     self.try_send(Message::Seek(seek_position)).await
   }
 
   async fn open_uri(&self, uri: String) -> fdo::Result<()> {
-    if let Some(file_path) = uri.strip_prefix("file://") {
-      let file_path = PathBuf::from(file_path);
-
+    if let Some(file_path) = decode_file_url(uri) {
       let (tx, rx) = oneshot::oneshot();
       self
         .try_send(Message::InsertTracks {
@@ -176,34 +178,28 @@ impl PlayerInterface for MprisImpl {
     }
   }
 
-  async fn playback_status(&self) -> fdo::Result<PlaybackStatus> {
+  async fn playback_status(&self) -> fdo::Result<mpris_server::PlaybackStatus> {
     let playback_state = self.try_query(Query::PlaybackState).await?;
-    Ok(playback_status(playback_state))
+    Ok(as_playback_status(playback_state))
   }
 
-  async fn loop_status(&self) -> fdo::Result<LoopStatus> {
+  async fn loop_status(&self) -> fdo::Result<mpris_server::LoopStatus> {
     let loop_mode = self.try_query(Query::LoopMode).await?;
-    Ok(loop_status(loop_mode))
+    Ok(as_loop_status(loop_mode))
   }
 
-  async fn set_loop_status(&self, loop_status: LoopStatus) -> zbus::Result<()> {
-    let loop_mode = match loop_status {
-      LoopStatus::None => LoopMode::None,
-      LoopStatus::Track => LoopMode::Track,
-      LoopStatus::Playlist => LoopMode::Playlist,
-    };
-
+  async fn set_loop_status(&self, loop_status: mpris_server::LoopStatus) -> zbus::Result<()> {
     self
-      .try_send(Message::SetLoopMode(loop_mode))
+      .try_send(Message::SetLoopMode(from_loop_status(loop_status)))
       .await
       .map_err(zbus::Error::from)
   }
 
-  async fn rate(&self) -> fdo::Result<PlaybackRate> {
+  async fn rate(&self) -> fdo::Result<mpris_server::PlaybackRate> {
     Ok(1.0)
   }
 
-  async fn set_rate(&self, rate: PlaybackRate) -> zbus::Result<()> {
+  async fn set_rate(&self, rate: mpris_server::PlaybackRate) -> zbus::Result<()> {
     if rate == 0.0 {
       self.pause().await?;
     } else if rate != 1.0 {
@@ -224,40 +220,40 @@ impl PlayerInterface for MprisImpl {
       .map_err(zbus::Error::from)
   }
 
-  async fn metadata(&self) -> fdo::Result<Metadata> {
-    if let Some(track) = self.try_query(Query::CurrentTrack).await? {
-      return Ok(metadata(&track));
-    }
+  async fn metadata(&self) -> fdo::Result<mpris_server::Metadata> {
+    let metadata = match self.try_query(Query::CurrentTrack).await? {
+      Some(track) => generate_metadata(&track),
+      None => mpris_server::Metadata::builder()
+        .trackid(mpris_server::TrackId::NO_TRACK)
+        .build(),
+    };
 
-    return Ok(Metadata::new());
+    Ok(metadata)
   }
 
-  async fn volume(&self) -> fdo::Result<Volume> {
+  async fn volume(&self) -> fdo::Result<mpris_server::Volume> {
     self
       .try_query(Query::Volume)
       .await
       .map(|volume| volume.into())
   }
 
-  async fn set_volume(&self, volume: Volume) -> zbus::Result<()> {
+  async fn set_volume(&self, volume: mpris_server::Volume) -> zbus::Result<()> {
     self
       .try_send(Message::SetVolume(volume as f32))
       .await
       .map_err(zbus::Error::from)
   }
 
-  async fn position(&self) -> fdo::Result<Time> {
-    self
-      .try_query(Query::Position)
-      .await
-      .map(|position| Time::from_micros(position.as_micros() as i64))
+  async fn position(&self) -> fdo::Result<mpris_server::Time> {
+    self.try_query(Query::Position).await.map(as_dbus_time)
   }
 
-  async fn minimum_rate(&self) -> fdo::Result<PlaybackRate> {
+  async fn minimum_rate(&self) -> fdo::Result<mpris_server::PlaybackRate> {
     Ok(1.0)
   }
 
-  async fn maximum_rate(&self) -> fdo::Result<PlaybackRate> {
+  async fn maximum_rate(&self) -> fdo::Result<mpris_server::PlaybackRate> {
     Ok(1.0)
   }
 

@@ -1,16 +1,15 @@
-use std::path::{Component, Path};
-
-use hsm_ipc::{LoopMode, PlaybackState, Track};
+use conversions::{as_dbus_time, as_loop_status, as_playback_status};
 use mpris_impl::MprisImpl;
 use mpris_server::{
-  LoopStatus, Metadata, PlaybackStatus, Property, Server, Signal, Time,
-  zbus::{self, zvariant::ObjectPath},
+  Property, Server, Signal,
+  zbus::{self},
 };
 use smol::channel::{Receiver, Sender};
 use thiserror::Error;
 
 use crate::audio_server::{event::Event, message::Message};
 
+mod conversions;
 mod mpris_impl;
 
 #[derive(Debug, Error)]
@@ -44,13 +43,13 @@ impl MprisServer {
       Event::PlaybackStateChanged(playback_state) => {
         self
           .server
-          .properties_changed([Property::PlaybackStatus(playback_status(playback_state))])
+          .properties_changed([Property::PlaybackStatus(as_playback_status(playback_state))])
           .await?;
       }
       Event::LoopModeChanged(loop_mode) => {
         self
           .server
-          .properties_changed([Property::LoopStatus(loop_status(loop_mode))])
+          .properties_changed([Property::LoopStatus(as_loop_status(loop_mode))])
           .await?;
       }
       Event::ShuffleChanged(shuffle) => {
@@ -69,7 +68,7 @@ impl MprisServer {
         self
           .server
           .emit(Signal::Seeked {
-            position: Time::from_micros(position.as_micros() as i64),
+            position: as_dbus_time(position),
           })
           .await?;
       }
@@ -89,72 +88,4 @@ impl MprisServer {
       self.recieve_event(event).await?;
     }
   }
-}
-
-fn playback_status(playback_state: PlaybackState) -> PlaybackStatus {
-  match playback_state {
-    PlaybackState::Playing => PlaybackStatus::Playing,
-    PlaybackState::Paused => PlaybackStatus::Paused,
-    PlaybackState::Stopped => PlaybackStatus::Stopped,
-  }
-}
-
-fn loop_status(loop_mode: LoopMode) -> LoopStatus {
-  match loop_mode {
-    LoopMode::None => LoopStatus::None,
-    LoopMode::Track => LoopStatus::Track,
-    LoopMode::Playlist => LoopStatus::Playlist,
-  }
-}
-
-fn encode_file_url(path: &Path) -> Option<String> {
-  let mut file_url = "file://".to_owned();
-  for component in path.components() {
-    match component {
-      Component::Normal(os_str) => {
-        file_url.push('/');
-        file_url.push_str(&urlencoding::encode(os_str.to_str()?));
-      }
-      _ => (),
-    }
-  }
-
-  Some(file_url)
-}
-
-fn metadata(track: &Track) -> Metadata {
-  let track_id = ObjectPath::from_static_str_unchecked("/dev/djlaser/HomeSlashMusic/DefaultTrack");
-
-  let metadata = track.metadata().clone();
-  let mut builder = Metadata::builder()
-    .trackid(track_id)
-    .artist(metadata.artists)
-    .genre(metadata.genres)
-    .comment(metadata.comments);
-
-  if let Some(title) = metadata.title {
-    builder = builder.title(title);
-  }
-
-  if let Some(album) = metadata.album {
-    builder = builder.album(album);
-  }
-
-  if let Some(track_number) = metadata.track_number {
-    builder = builder.track_number(track_number as i32);
-  }
-
-  if let Some(date) = metadata.date {
-    builder = builder.content_created(date);
-  }
-
-  if let Some(duration) = track.audio_spec().total_duration {
-    builder = builder.length(Time::from_micros(duration.as_micros() as i64));
-  }
-
-  if let Some(url) = encode_file_url(track.file_path()) {
-    builder = builder.url(url);
-  }
-
-  builder.build()
 }
