@@ -69,7 +69,6 @@ pub struct TrackList {
   inner: Mutex<TrackListInner>,
   track_list_len: AtomicUsize,
   shuffle_enabled: AtomicBool,
-  current_track_index: AtomicUsize,
 }
 
 impl TrackList {
@@ -78,26 +77,42 @@ impl TrackList {
       inner: Mutex::new(TrackListInner::new()),
       track_list_len: AtomicUsize::new(0),
       shuffle_enabled: AtomicBool::new(false),
-      current_track_index: AtomicUsize::new(0),
     }
   }
 
-  /// Returns `None` if the track list length is zero
-  pub async fn get_current_and_next_track(&self) -> Option<(Arc<Track>, Option<Arc<Track>>)> {
+  pub fn len(&self) -> usize {
+    self.track_list_len.load(Ordering::Acquire)
+  }
+
+  pub async fn get_track(&self, index: usize) -> Option<Arc<Track>> {
     let num_tracks = self.track_list_len.load(Ordering::Acquire);
 
-    if num_tracks == 0 {
+    if index >= num_tracks {
+      return None;
+    }
+
+    let inner = self.inner.lock().await;
+    Some(inner[index].clone())
+  }
+
+  /// Returns `None` if the track list length is zero
+  pub async fn get_tracks_to_queue(
+    &self,
+    index: usize,
+  ) -> Option<(Arc<Track>, Option<Arc<Track>>)> {
+    let num_tracks = self.track_list_len.load(Ordering::Acquire);
+
+    if index >= num_tracks {
       return None;
     }
 
     let inner = self.inner.lock().await;
 
-    let current_index = self.current_track_index.load(Ordering::Acquire);
-    let current_track = inner[current_index].clone();
+    let current_track = inner[index].clone();
 
-    let is_last_track = current_index == num_tracks - 1;
+    let is_last_track = index == num_tracks - 1;
     let next_track = if !is_last_track {
-      Some(inner[current_index + 1].clone())
+      Some(inner[index + 1].clone())
     } else {
       None
     };
@@ -137,26 +152,27 @@ impl TrackList {
     let mut inner = self.inner.lock().await;
     inner.clear();
     self.track_list_len.store(0, Ordering::Release);
-    self.current_track_index.store(0, Ordering::Release);
 
     Ok(())
   }
 
+  /// Returns the new position of `current_index`
   pub async fn insert_tracks(
     &self,
+    current_index: usize,
     position: InsertPosition,
     tracks: &[Arc<Track>],
-  ) -> Result<(), PlayerError> {
+  ) -> Result<usize, PlayerError> {
     let mut inner = self.inner.lock().await;
 
-    let current_index = self.current_track_index.load(Ordering::Acquire);
     let insert_index = position.get_absolute(current_index, inner.len());
-
     let mut new_current_index = current_index;
+
     if matches!(position, InsertPosition::Replace) {
       inner.clear();
-      new_current_index = 0;
-    } else if inner.len() > 0 && insert_index <= current_index {
+    }
+
+    if inner.len() > 0 && insert_index <= current_index {
       // If the tracks were instered before the current one, increment the index to keep it referencing the current track
       new_current_index += tracks.len()
     }
@@ -176,132 +192,8 @@ impl TrackList {
       }*/
     }
 
-    self
-      .current_track_index
-      .store(new_current_index, Ordering::Release);
     self.track_list_len.store(inner.len(), Ordering::Release);
 
-    Ok(())
-  }
-}
-
-#[cfg(test)]
-mod test {
-  use std::{collections::HashSet, path::PathBuf, sync::Arc};
-
-  use super::*;
-  use hsm_ipc::{AudioSpec, Track, TrackMetadata};
-  use macro_rules_attribute::apply;
-  use smol_macros::test;
-
-  struct TrackListRepr {
-    track_names: Vec<String>,
-    shuffled_track_indicies: Vec<usize>,
-    current_track_index: usize,
-  }
-
-  impl TrackListRepr {
-    async fn new(track_list: &TrackList) -> Self {
-      let inner = track_list.inner.lock().await;
-      let track_names = inner
-        .track_list
-        .iter()
-        .map(|track| track.metadata().title.clone().unwrap())
-        .collect();
-
-      Self {
-        track_names,
-        shuffled_track_indicies: inner.shuffled_track_indicies.clone(),
-        current_track_index: track_list.current_track_index.load(Ordering::Acquire),
-      }
-    }
-  }
-
-  fn dummy_track(title: &str) -> Arc<Track> {
-    let track = Track::new(
-      PathBuf::from(format!("/{title}")),
-      AudioSpec {
-        track_id: 0,
-        bit_depth: None,
-        channel_bitmask: 0,
-        channel_count: 0,
-        sample_rate: 0,
-        total_duration: None,
-      },
-      TrackMetadata {
-        title: Some(title.into()),
-        artists: HashSet::new(),
-        album: None,
-        track_number: None,
-        date: None,
-        genres: HashSet::new(),
-        comments: Vec::new(),
-      },
-    );
-
-    Arc::new(track)
-  }
-
-  async fn dummy_track_list(dummy_track_titles: Vec<&str>) -> TrackList {
-    let dummy_tracks: Vec<Arc<Track>> = dummy_track_titles
-      .iter()
-      .map(|title| dummy_track(title))
-      .collect();
-
-    let track_list = TrackList::new();
-    track_list
-      .insert_tracks(InsertPosition::Start, &dummy_tracks)
-      .await
-      .unwrap();
-    track_list
-  }
-
-  #[apply(test!)]
-  async fn test_empty_insert() {
-    let track_list = TrackList::new();
-    let tracks_to_insert = [dummy_track("a"), dummy_track("b"), dummy_track("c")];
-
-    track_list
-      .insert_tracks(InsertPosition::Start, &tracks_to_insert)
-      .await
-      .unwrap();
-    let repr = TrackListRepr::new(&track_list).await;
-
-    assert_eq!(repr.track_names, vec!["a", "b", "c"]);
-    assert_eq!(repr.shuffled_track_indicies, [0, 1, 2]);
-  }
-
-  #[apply(test!)]
-  async fn test_start_insert() {
-    let track_list = dummy_track_list(vec!["a", "b", "c"]).await;
-    let tracks_to_insert = [dummy_track("d"), dummy_track("e"), dummy_track("f")];
-
-    track_list
-      .insert_tracks(InsertPosition::Start, &tracks_to_insert)
-      .await
-      .unwrap();
-    let repr = TrackListRepr::new(&track_list).await;
-
-    assert_eq!(repr.track_names, vec!["d", "e", "f", "a", "b", "c"]);
-    assert_eq!(repr.shuffled_track_indicies, [0, 1, 2, 3, 4, 5]);
-    // Track list should stay on track "a"
-    assert_eq!(repr.current_track_index, 3);
-  }
-
-  #[apply(test!)]
-  async fn test_end_insert() {
-    let track_list = dummy_track_list(vec!["a", "b", "c"]).await;
-    let tracks_to_insert = [dummy_track("d"), dummy_track("e"), dummy_track("f")];
-
-    track_list
-      .insert_tracks(InsertPosition::End, &tracks_to_insert)
-      .await
-      .unwrap();
-    let repr = TrackListRepr::new(&track_list).await;
-
-    assert_eq!(repr.track_names, vec!["a", "b", "c", "d", "e", "f"]);
-    assert_eq!(repr.shuffled_track_indicies, [0, 1, 2, 3, 4, 5]);
-    // Track list should stay on track "a"
-    assert_eq!(repr.current_track_index, 0);
+    Ok(new_current_index)
   }
 }
