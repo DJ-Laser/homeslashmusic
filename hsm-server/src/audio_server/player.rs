@@ -1,5 +1,4 @@
 use std::{
-  mem,
   sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
@@ -68,9 +67,6 @@ pub enum PlayerError {
   #[error("Failed to load track: {0}")]
   LoadTrack(#[from] LoadTrackError),
 
-  #[error("Shuffle failed, could not determine new current track position")]
-  ShuffleFailedNoCurrentTrack,
-
   #[error("failed to seek: ")]
   SeekFailed(#[from] SeekError),
 }
@@ -80,7 +76,6 @@ impl PlayerError {
     match self {
       Self::LoadTrack(_) => true,
       Self::SeekFailed(_) => true,
-      Self::ShuffleFailedNoCurrentTrack => true,
       _ => false,
     }
   }
@@ -299,7 +294,7 @@ impl Player {
   pub async fn set_shuffle(&self, shuffle: bool) -> Result<(), PlayerError> {
     let prev_shuffle = self.shuffle().await;
     if shuffle != prev_shuffle {
-      self.tracks.set_shuffle(shuffle);
+      self.tracks.set_shuffle(shuffle).await?;
 
       self.emit(Event::ShuffleChanged(shuffle))?;
       println!("Shuffle set to {shuffle}");
@@ -374,7 +369,7 @@ impl Player {
 
   pub async fn clear_tracks(&self) -> Result<(), PlayerError> {
     self.stop().await?;
-    self.tracks.clear().await;
+    self.tracks.clear().await?;
     println!("Clearing track list");
 
     Ok(())
@@ -386,7 +381,7 @@ impl Player {
     position: InsertPosition,
     tracks: &[Arc<Track>],
   ) -> Result<(), PlayerError> {
-    self.tracks.insert_tracks(position, tracks);
+    self.tracks.insert_tracks(position, tracks).await?;
 
     // If the track list was replaced, a new song must begin playing
     if matches!(position, InsertPosition::Replace)

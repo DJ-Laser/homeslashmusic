@@ -26,11 +26,6 @@ impl TrackListInner {
     }
   }
 
-  pub fn get_track(&self, index: usize) -> &Arc<Track> {
-    debug_assert_eq!(self.track_list.len(), self.track_list.len());
-    &self.track_list[self.shuffled_track_indicies[index]]
-  }
-
   pub fn clear(&mut self) {
     self.track_list.clear();
     self.shuffled_track_indicies.clear();
@@ -62,6 +57,7 @@ impl Index<usize> for TrackListInner {
   type Output = Arc<Track>;
 
   fn index(&self, index: usize) -> &Self::Output {
+    debug_assert_eq!(self.track_list.len(), self.track_list.len());
     &self.track_list[self.shuffled_track_indicies[index]]
   }
 }
@@ -138,7 +134,9 @@ impl TrackList {
   }
 
   pub async fn clear(&self) -> Result<(), PlayerError> {
-    self.inner.lock().await.clear();
+    let mut inner = self.inner.lock().await;
+    inner.clear();
+    self.track_list_len.store(0, Ordering::Release);
     self.current_track_index.store(0, Ordering::Release);
 
     Ok(())
@@ -167,18 +165,21 @@ impl TrackList {
 
     // Move new shuffle indicies to random locations
     if self.shuffle_enabled() {
-      let inserted_track_range = insert_index..(insert_index + tracks.len());
+      //TODO: Move to  positions and update `new_current_index`
+      /*let inserted_track_range = insert_index..(insert_index + tracks.len());
       let shuffle_indicies: Vec<usize> = inner
         .shuffled_track_indicies
         .drain(inserted_track_range)
         .collect();
 
-      for shuffle_index in shuffle_indicies {}
+      for shuffle_index in shuffle_indicies {
+      }*/
     }
 
     self
       .current_track_index
       .store(new_current_index, Ordering::Release);
+    self.track_list_len.store(inner.len(), Ordering::Release);
 
     Ok(())
   }
