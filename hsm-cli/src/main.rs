@@ -36,7 +36,7 @@ fn handle_queue_command(command: QueueCommand) -> Result<StandardReply, crate::E
     QueueCommand::Clear => send_request(requests::ClearTracks)?,
     QueueCommand::Replace { tracks } => try_load_tracks(InsertPosition::Replace, &tracks.paths)?,
     QueueCommand::Add { tracks } => try_load_tracks(InsertPosition::End, &tracks.paths)?,
-    QueueCommand::Next { tracks } => try_load_tracks(InsertPosition::Relative(1), &tracks.paths)?,
+    QueueCommand::Next { tracks } => try_load_tracks(InsertPosition::Next, &tracks.paths)?,
   };
 
   Ok(res)
