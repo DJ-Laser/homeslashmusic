@@ -4,35 +4,30 @@ use crate::cli::{Cli, Command, QueueCommand};
 use crate::ipc::send_request;
 use hsm_ipc::{InsertPosition, LoopMode, client::TrackList, requests};
 
-type StandardReply = Result<(), String>;
-
-fn try_load_tracks(
-  position: InsertPosition,
-  paths: &[PathBuf],
-) -> Result<StandardReply, crate::Error> {
+fn try_load_tracks(position: InsertPosition, paths: &[PathBuf]) -> Result<(), crate::Error> {
   let mut absolute_paths = Vec::new();
   for path in paths {
     absolute_paths.push(path::absolute(path).map_err(crate::Error::GetCurrentDirFailed)?);
   }
 
-  let res = send_request(requests::LoadTracks(position, absolute_paths))?;
+  let errors = send_request(requests::LoadTracks(position, absolute_paths))?;
 
-  Ok(res.map(|errors| {
-    for (path, error) in errors {
-      eprintln!("Failed to load track {path:?}: {error}")
-    }
-  }))
+  for (path, error) in errors {
+    eprintln!("Failed to load track {path:?}: {error}")
+  }
+
+  Ok(())
 }
 
-fn handle_queue_command(command: QueueCommand) -> Result<StandardReply, crate::Error> {
-  let res = match command {
+fn handle_queue_command(command: QueueCommand) -> Result<(), crate::Error> {
+  match command {
     QueueCommand::Clear => send_request(requests::ClearTracks)?,
     QueueCommand::Replace { tracks } => try_load_tracks(InsertPosition::Replace, &tracks.paths)?,
     QueueCommand::Add { tracks } => try_load_tracks(InsertPosition::End, &tracks.paths)?,
     QueueCommand::Next { tracks } => try_load_tracks(InsertPosition::Next, &tracks.paths)?,
   };
 
-  Ok(res)
+  Ok(())
 }
 
 fn print_track_list(track_list: &TrackList) {
@@ -49,18 +44,13 @@ fn print_track_list(track_list: &TrackList) {
 }
 
 pub fn handle_command(command: Cli) -> Result<(), crate::Error> {
-  let reply: Result<(), String> = match command.command {
+  match command.command {
     Command::Play { tracks } => {
-      let res = if let Some(tracks) = tracks {
-        try_load_tracks(InsertPosition::Replace, &tracks.paths)?
-      } else {
-        Ok(())
-      };
-
-      match res {
-        Ok(()) => send_request(requests::Play)?,
-        Err(error) => Err(error),
+      if let Some(tracks) = tracks {
+        try_load_tracks(InsertPosition::Replace, &tracks.paths)?;
       }
+
+      send_request(requests::Play)?
     }
     Command::Pause => send_request(requests::Pause)?,
     Command::PlayPause => send_request(requests::TogglePlayback)?,
@@ -74,11 +64,11 @@ pub fn handle_command(command: Cli) -> Result<(), crate::Error> {
         send_request(requests::SetLoopMode(loop_mode.into()))?
       } else {
         let loop_mode = send_request(requests::QueryLoopMode)?;
-        loop_mode.map(|loop_mode| match loop_mode {
+        match loop_mode {
           LoopMode::None => println!("Loop: none"),
           LoopMode::Track => println!("Loop: track"),
           LoopMode::Playlist => println!("Loop: playlist"),
-        })
+        }
       }
     }
     Command::Shuffle { shuffle } => {
@@ -86,11 +76,10 @@ pub fn handle_command(command: Cli) -> Result<(), crate::Error> {
         send_request(requests::SetShuffle(shuffle.into()))?
       } else {
         let shuffle = send_request(requests::QueryShuffle)?;
-
-        shuffle.map(|shuffle| match shuffle {
+        match shuffle {
           true => println!("Shuffle: on"),
           false => println!("Shuffle: off"),
-        })
+        }
       }
     }
     Command::Volume { volume } => {
@@ -98,8 +87,7 @@ pub fn handle_command(command: Cli) -> Result<(), crate::Error> {
         send_request(requests::SetVolume(volume))?
       } else {
         let volume = send_request(requests::QueryVolume)?;
-
-        volume.map(|volume| println!("Volume: {volume}"))
+        println!("Volume: {volume}");
       }
     }
 
@@ -112,14 +100,10 @@ pub fn handle_command(command: Cli) -> Result<(), crate::Error> {
         handle_queue_command(QueueCommand::Add { tracks })?
       } else {
         let track_list = send_request(requests::QueryTrackList)?;
-
-        track_list.map(|track_list| print_track_list(&track_list))
+        print_track_list(&track_list);
       }
     }
   };
 
-  if let Err(message) = reply {
-    return Err(crate::Error::Server(message));
-  }
   Ok(())
 }

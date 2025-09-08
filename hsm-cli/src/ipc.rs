@@ -5,11 +5,13 @@ use std::{
 };
 
 use hsm_ipc::{
-  Reply, Request,
+  Request,
   client::{deserialize_reply, serialize_request},
 };
 
-pub fn send_request<R: Request>(request: R) -> Result<Reply<R>, crate::Error> {
+use crate::Error;
+
+pub fn send_request<R: Request>(request: R) -> Result<R::Response, crate::Error> {
   let socket_path = hsm_ipc::socket_path();
   let mut stream =
     UnixStream::connect(socket_path).map_err(|source| crate::Error::FailedToConnectToSocket {
@@ -33,5 +35,6 @@ pub fn send_request<R: Request>(request: R) -> Result<Reply<R>, crate::Error> {
     .map_err(crate::Error::StreamReadWrite)?;
 
   let reply = deserialize_reply::<R>(&reply_data).map_err(crate::Error::Deserialize)?;
-  Ok(reply)
+
+  reply.map_err(|error| Error::Server(error))
 }

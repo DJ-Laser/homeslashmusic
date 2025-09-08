@@ -27,7 +27,6 @@ pub enum Error {
   #[error("Error: {0}")]
   Server(String),
 }
-
 fn main() -> Result<(), crate::Error> {
   let command = Cli::parse();
 
