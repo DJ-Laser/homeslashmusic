@@ -31,6 +31,10 @@ fn handle_queue_command(command: QueueCommand) -> Result<(), crate::Error> {
 }
 
 fn print_track_list(track_list: &TrackList) {
+  if track_list.len() == 0 {
+    println!("No tracks loaded");
+  }
+
   for track in track_list.iter() {
     let title = track
       .metadata()
