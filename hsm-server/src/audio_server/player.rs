@@ -227,6 +227,10 @@ impl Player {
     self.controls.playback_state.load(Ordering::Acquire)
   }
 
+  fn is_stopped(&self) -> bool {
+    matches!(self.playback_state(), PlaybackState::Stopped)
+  }
+
   fn set_playback_state(&self, new_state: PlaybackState) -> Result<PlaybackState, PlayerError> {
     let prev_state = self
       .controls
@@ -241,10 +245,7 @@ impl Player {
   }
 
   pub async fn play(&self) -> Result<(), PlayerError> {
-    if matches!(
-      self.controls.playback_state.load(Ordering::Acquire),
-      PlaybackState::Stopped
-    ) {
+    if self.is_stopped() {
       let had_tracks = self.queue_current_track(true).await?;
       if !had_tracks {
         return Ok(());
@@ -308,14 +309,24 @@ impl Player {
     } else {
       println!("Track list reached {printed_position}, looping to {printed_loop_position}");
 
-      self.queue_current_track(false).await?;
+      if !self.is_stopped() {
+        self.queue_current_track(false).await?;
+      }
     };
 
     Ok(())
   }
 
   pub async fn go_to_next_track(&self) -> Result<(), PlayerError> {
-    self.current_track_index.fetch_add(1, Ordering::Release);
+    let new_index = 1 + self.current_track_index.fetch_add(1, Ordering::Release);
+
+    if self.is_stopped() {
+      if new_index >= self.tracks.len() {
+        self.stop_or_wrap_track(false).await?;
+      }
+
+      return Ok(());
+    }
 
     if !self.queue_current_track(true).await? {
       self.stop_or_wrap_track(false).await?;
@@ -338,7 +349,10 @@ impl Player {
         self
           .current_track_index
           .store(current_index - 1, Ordering::Release);
-        self.queue_current_track(false).await?;
+
+        if !self.is_stopped() {
+          self.queue_current_track(false).await?;
+        }
       }
 
       Ok(())
@@ -360,7 +374,7 @@ impl Player {
       self.emit(Event::ShuffleChanged(shuffle))?;
       println!("Shuffle set to {shuffle}");
 
-      if !matches!(self.playback_state(), PlaybackState::Stopped) {
+      if !self.is_stopped() {
         let current_track_index = self.current_track_index.load(Ordering::Acquire);
         if let Some((_, Some(next_track))) =
           self.tracks.get_tracks_to_queue(current_track_index).await
@@ -463,9 +477,7 @@ impl Player {
       .store(new_current_index, Ordering::Release);
 
     // If the track list was replaced, a new song must begin playing
-    if matches!(position, InsertPosition::Replace)
-      && !matches!(self.playback_state(), PlaybackState::Stopped)
-    {
+    if matches!(position, InsertPosition::Replace) && !self.is_stopped() {
       self.queue_current_track(false).await?;
     }
 
