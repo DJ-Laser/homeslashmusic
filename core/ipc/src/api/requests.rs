@@ -1,6 +1,9 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, time::Duration};
 
-use super::{InsertPosition, LoopMode, Request, SeekPosition, private::SealedRequest, responses};
+use super::{
+  InsertPosition, LoopMode, PlaybackState, Request, SeekPosition, Track, client::TrackList,
+  private::SealedRequest, responses,
+};
 
 macro_rules! requests {
   (@def $name:ident ()) => {
@@ -76,25 +79,33 @@ paste::paste! {
 requests! {
   Version() -> responses::Version;
 
+  QueryPlaybackState() -> PlaybackState;
   Play() -> ();
   Pause() -> ();
   StopPlayback() -> ();
   TogglePlayback() -> ();
 
+  QueryCurrentTrack() -> Option<Track>;
+  QueryCurrentTrackIndex() -> usize;
   NextTrack() -> ();
   PreviousTrack {
     /// Restarts the track instead of going to the previous track if enough time has passed
     pub soft: bool,
   } -> ();
 
+  QueryLoopMode() -> LoopMode;
   SetLoopMode(LoopMode) -> ();
 
+  QueryShuffle() -> bool;
   SetShuffle(bool) -> ();
 
+  QueryVolume() -> f32;
   SetVolume(f32) -> ();
 
+  QueryPosition() -> Duration;
   Seek(SeekPosition) -> ();
 
+  QueryTrackList() -> TrackList;
   ClearTracks() -> ();
   LoadTracks(InsertPosition, Vec<PathBuf>) -> Vec<(PathBuf, String)>;
 }

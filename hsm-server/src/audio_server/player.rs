@@ -285,6 +285,17 @@ impl Player {
     Ok(())
   }
 
+  pub async fn current_track(&self) -> Option<Arc<Track>> {
+    self
+      .tracks
+      .get_track(self.current_track_index.load(Ordering::Acquire))
+      .await
+  }
+
+  pub fn current_track_index(&self) -> usize {
+    self.current_track_index.load(Ordering::Acquire)
+  }
+
   async fn stop_or_wrap_track(&self, reverse: bool) -> Result<(), PlayerError> {
     let printed_position = if reverse { "beginning" } else { "end" };
     let printed_loop_position = if reverse { "end" } else { "beginning" };
@@ -387,7 +398,7 @@ impl Player {
     Ok(())
   }
 
-  pub async fn loop_mode(&self) -> LoopMode {
+  pub fn loop_mode(&self) -> LoopMode {
     self.controls.loop_mode.load(Ordering::Relaxed)
   }
 
@@ -443,13 +454,6 @@ impl Player {
     Ok(())
   }
 
-  pub async fn current_track(&self) -> Option<Arc<Track>> {
-    self
-      .tracks
-      .get_track(self.current_track_index.load(Ordering::Acquire))
-      .await
-  }
-
   pub async fn clear_tracks(&self) -> Result<(), PlayerError> {
     self.stop().await?;
     self.tracks.clear().await?;
@@ -457,6 +461,10 @@ impl Player {
     println!("Clearing track list");
 
     Ok(())
+  }
+
+  pub async fn get_track_list(&self) -> hsm_ipc::client::TrackList {
+    self.tracks.get_track_list().await
   }
 
   /// Inserts new tracks at a specified position in the track list

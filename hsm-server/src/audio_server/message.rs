@@ -1,7 +1,7 @@
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use async_oneshot as oneshot;
-use hsm_ipc::{InsertPosition, LoopMode, PlaybackState, SeekPosition, Track};
+use hsm_ipc::{InsertPosition, LoopMode, PlaybackState, SeekPosition, Track, client::TrackList};
 
 use super::track::LoadTrackError;
 
@@ -12,6 +12,8 @@ pub enum Query {
   Shuffle(oneshot::Sender<bool>),
   Position(oneshot::Sender<Duration>),
   CurrentTrack(oneshot::Sender<Option<Arc<Track>>>),
+  CurrentTrackIndex(oneshot::Sender<usize>),
+  IpcTrackList(oneshot::Sender<TrackList>),
 }
 
 pub enum Message {

@@ -248,4 +248,16 @@ impl TrackList {
       Ok(0)
     }
   }
+
+  pub async fn get_track_list(&self) -> hsm_ipc::client::TrackList {
+    let inner = self.inner.lock().await;
+
+    let track_list = inner
+      .track_list
+      .iter()
+      .map(|arc_track| Track::clone(&arc_track))
+      .collect();
+
+    hsm_ipc::client::TrackList::new(track_list, inner.shuffled_track_indicies.clone())
+  }
 }

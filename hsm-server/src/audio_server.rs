@@ -98,11 +98,13 @@ impl AudioServer {
   async fn handle_query(&self, query: Query) {
     let _ = match query {
       Query::PlaybackState(mut tx) => tx.send(self.player.playback_state()),
-      Query::LoopMode(mut tx) => tx.send(self.player.loop_mode().await),
+      Query::LoopMode(mut tx) => tx.send(self.player.loop_mode()),
       Query::Shuffle(mut tx) => tx.send(self.player.shuffle().await),
       Query::Volume(mut tx) => tx.send(self.player.volume().await),
       Query::Position(mut tx) => tx.send(self.player.position().await),
       Query::CurrentTrack(mut tx) => tx.send(self.player.current_track().await),
+      Query::CurrentTrackIndex(mut tx) => tx.send(self.player.current_track_index()),
+      Query::IpcTrackList(mut tx) => tx.send(self.player.get_track_list().await),
     };
   }
 

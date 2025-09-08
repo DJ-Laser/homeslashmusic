@@ -6,7 +6,7 @@ use std::{
 
 use async_oneshot as oneshot;
 use hsm_ipc::{
-  Reply, requests, responses,
+  Reply, Track, requests, responses,
   server::{RequestHandler, handle_request},
 };
 use smol::{
@@ -18,7 +18,7 @@ use smol::{
 };
 use thiserror::Error;
 
-use crate::audio_server::message::Message;
+use crate::audio_server::message::{Message, Query};
 
 #[derive(Debug, Error)]
 pub enum IpcServerError {
@@ -131,11 +131,30 @@ impl StreamHandler {
       .await
       .map_err(|e| e.to_string())
   }
+
+  async fn try_query<T>(&self, query: impl Fn(oneshot::Sender<T>) -> Query) -> Result<T, String> {
+    let (query_tx, query_rx) = oneshot::oneshot();
+    self
+      .try_send_message(Message::Query(query(query_tx)))
+      .await?;
+    Ok(
+      query_rx
+        .await
+        .map_err(|_| "sending into a closed channel")?,
+    )
+  }
 }
 
 impl RequestHandler for StreamHandler {
   async fn handle_version(&self, _: requests::Version) -> Reply<requests::Version> {
     Ok(responses::Version(hsm_ipc::version()))
+  }
+
+  async fn handle_query_playback_state(
+    &self,
+    _request: requests::QueryPlaybackState,
+  ) -> Reply<requests::QueryPlaybackState> {
+    self.try_query(Query::PlaybackState).await
   }
 
   async fn handle_play(&self, _request: requests::Play) -> Reply<requests::Play> {
@@ -160,6 +179,22 @@ impl RequestHandler for StreamHandler {
     self.try_send_message(Message::Toggle).await
   }
 
+  async fn handle_query_current_track(
+    &self,
+    _request: requests::QueryCurrentTrack,
+  ) -> Reply<requests::QueryCurrentTrack> {
+    let track = self.try_query(Query::CurrentTrack).await?;
+
+    Ok(track.map(|arc_track| Track::clone(&arc_track)))
+  }
+
+  async fn handle_query_current_track_index(
+    &self,
+    _request: requests::QueryCurrentTrackIndex,
+  ) -> Reply<requests::QueryCurrentTrackIndex> {
+    self.try_query(Query::CurrentTrackIndex).await
+  }
+
   async fn handle_next_track(&self, _request: requests::NextTrack) -> Reply<requests::NextTrack> {
     self.try_send_message(Message::NextTrack).await
   }
@@ -173,6 +208,13 @@ impl RequestHandler for StreamHandler {
       .await
   }
 
+  async fn handle_query_loop_mode(
+    &self,
+    _request: requests::QueryLoopMode,
+  ) -> Reply<requests::QueryLoopMode> {
+    self.try_query(Query::LoopMode).await
+  }
+
   async fn handle_set_loop_mode(
     &self,
     request: requests::SetLoopMode,
@@ -180,16 +222,44 @@ impl RequestHandler for StreamHandler {
     self.try_send_message(Message::SetLoopMode(request.0)).await
   }
 
+  async fn handle_query_shuffle(
+    &self,
+    _request: requests::QueryShuffle,
+  ) -> Reply<requests::QueryShuffle> {
+    self.try_query(Query::Shuffle).await
+  }
+
   async fn handle_set_shuffle(&self, request: requests::SetShuffle) -> Reply<requests::SetVolume> {
     self.try_send_message(Message::SetShuffle(request.0)).await
+  }
+
+  async fn handle_query_volume(
+    &self,
+    _request: requests::QueryVolume,
+  ) -> Reply<requests::QueryVolume> {
+    self.try_query(Query::Volume).await
   }
 
   async fn handle_set_volume(&self, request: requests::SetVolume) -> Reply<requests::SetVolume> {
     self.try_send_message(Message::SetVolume(request.0)).await
   }
 
+  async fn handle_query_position(
+    &self,
+    _request: requests::QueryPosition,
+  ) -> Reply<requests::QueryPosition> {
+    self.try_query(Query::Position).await
+  }
+
   async fn handle_seek(&self, request: requests::Seek) -> Reply<requests::Seek> {
     self.try_send_message(Message::Seek(request.0)).await
+  }
+
+  async fn handle_query_track_list(
+    &self,
+    _request: requests::QueryTrackList,
+  ) -> Reply<requests::QueryTrackList> {
+    self.try_query(Query::IpcTrackList).await
   }
 
   async fn handle_clear_tracks(
