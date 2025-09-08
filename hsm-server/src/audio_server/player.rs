@@ -11,7 +11,7 @@ use async_oneshot as oneshot;
 use controlled_source::{SeekError, SourceEvent, wrap_source};
 use decoder::TrackDecoder;
 use hsm_ipc::{InsertPosition, LoopMode, PlaybackState, SeekPosition, Track};
-use output::NextSourceState;
+use output::SourceQueueState;
 use rodio::{Source, mixer::Mixer};
 use smol::{
   channel::{self, Receiver, Sender},
@@ -38,11 +38,11 @@ struct Controls {
   pub to_skip: AtomicUsize,
   pub position: Mutex<Duration>,
   pub seek_position: Mutex<Option<(SeekPosition, oneshot::Sender<Result<(), SeekError>>)>>,
-  pub next_source: Mutex<NextSourceState>,
+  pub source_queue: Mutex<SourceQueueState>,
 }
 
 impl Controls {
-  pub fn new() -> Self {
+  fn new() -> Self {
     Self {
       playback_state: AtomicPlaybackState::new(PlaybackState::Stopped),
       loop_mode: AtomicLoopMode::new(LoopMode::None),
@@ -50,7 +50,7 @@ impl Controls {
       volume: Mutex::new(1.0),
       position: Mutex::new(Duration::ZERO),
       seek_position: Mutex::new(None),
-      next_source: Mutex::new(NextSourceState::None),
+      source_queue: Mutex::new(SourceQueueState::None),
     }
   }
 }
@@ -137,37 +137,37 @@ impl Player {
     )))
   }
 
-  /// Updates the source_queue based on `replace_fn`
-  /// `replace_fn` returns an Optional track to load and a bool determining whether to skip the current source
-  async fn replace_source_queue<'s, 'a, F>(&'s self, replace_fn: F) -> Result<(), LoadTrackError>
-  where
-    F: FnOnce(&NextSourceState) -> (Option<&'a Arc<Track>>, bool),
-    'a: 's,
-  {
-    let mut source_queue = self.controls.next_source.lock().await;
-    let (replace_with, skip_current) = replace_fn(&source_queue);
+  async fn clear_source_queue(&self) {
+    let mut source_queue = self.controls.source_queue.lock().await;
 
-    if let Some(track) = replace_with {
-      // Unlock mutex while loading next source
-      mem::drop(source_queue);
-      let source = self.load_track_source(track).await?;
-
-      source_queue = self.controls.next_source.lock().await;
-      *source_queue = NextSourceState::Queued(source);
-    }
-
-    if skip_current && !matches!(*source_queue, NextSourceState::None) {
+    if source_queue.is_playing() {
+      source_queue.invalidate();
       self.controls.to_skip.fetch_add(1, Ordering::AcqRel);
     }
-
-    Ok(())
   }
 
-  async fn clear_source_queue(&self) {
-    self
-      .replace_source_queue(|_| (None, true))
-      .await
-      .expect("Track loading can't fail if no track is provided to be loaded");
+  /// If `wait_for_empty_queue` is true, this function will loop until the queue become open for replacement
+  /// If it is not ensured that the queue is empty beforehand it can cause an infinite loop and lockup
+  async fn queue_track(
+    &self,
+    track: &Arc<Track>,
+    wait_for_empty_queue: bool,
+  ) -> Result<(), LoadTrackError> {
+    let source = self.load_track_source(track).await?;
+    let mut source_queue = self.controls.source_queue.lock().await;
+
+    while !wait_for_empty_queue && source_queue.is_queued() {
+      // Unlock the queue mutex
+      mem::drop(source_queue);
+
+      smol::Timer::after(controlled_source::SOURCE_UPDATE_INTERVAL * 3).await;
+      source_queue = self.controls.source_queue.lock().await;
+    }
+
+    source_queue.invalidate();
+    *source_queue = SourceQueueState::Queued(source);
+
+    Ok(())
   }
 
   /// Returns true if there was a current track to queue
@@ -184,43 +184,40 @@ impl Player {
       return Ok(false);
     };
 
-    self
-      .replace_source_queue(|source_queue| {
-        if !use_queued {
-          return (Some(&current_track), true);
+    let load_necessary = {
+      let mut source_queue = self.controls.source_queue.lock().await;
+      match *source_queue {
+        // Skip the current track so the queued one plays
+        SourceQueueState::Queued(_) => {
+          self.controls.to_skip.fetch_add(1, Ordering::AcqRel);
+          if !use_queued {
+            source_queue.invalidate();
+          }
+
+          !use_queued
         }
 
-        match source_queue {
-          // Skip the current track so the queued one plays
-          NextSourceState::Queued(_) => (None, true),
+        // No queued track means the current track ended and the next (queued) track began playing
+        // If `use_queued` is false skip and load a new track
+        SourceQueueState::Playing => {
+          if !use_queued {
+            self.controls.to_skip.fetch_add(1, Ordering::AcqRel);
+          }
 
-          // No queued track means the current track ended and the next (queued) track began playing
-          NextSourceState::Playing => (None, false),
-
-          // No track playing, load the current track
-          NextSourceState::None => (Some(&current_track), false),
+          !use_queued
         }
-      })
-      .await?;
+
+        // No track playing, load the current track
+        SourceQueueState::None => true,
+      }
+    };
+
+    if load_necessary {
+      self.queue_track(&current_track, true).await?;
+    }
 
     if let Some(next_track) = next_track {
-      let mut next_track_queued = false;
-      while !next_track_queued {
-        self
-          .replace_source_queue(|source_queue| {
-            match source_queue {
-              // Current track not playing yet
-              NextSourceState::Queued(_) => (None, false),
-
-              // Current track began, queue next
-              NextSourceState::Playing | NextSourceState::None => {
-                next_track_queued = true;
-                (Some(&next_track), false)
-              }
-            }
-          })
-          .await?;
-      }
+      self.queue_track(&next_track, false).await?;
     }
 
     Ok(true)
@@ -362,6 +359,15 @@ impl Player {
 
       self.emit(Event::ShuffleChanged(shuffle))?;
       println!("Shuffle set to {shuffle}");
+
+      if !matches!(self.playback_state(), PlaybackState::Stopped) {
+        let current_track_index = self.current_track_index.load(Ordering::Acquire);
+        if let Some((_, Some(next_track))) =
+          self.tracks.get_tracks_to_queue(current_track_index).await
+        {
+          self.queue_track(&next_track, true).await?;
+        }
+      }
     }
 
     Ok(())
@@ -408,8 +414,8 @@ impl Player {
 
   pub async fn seek(&self, seek_position: SeekPosition) -> Result<(), PlayerError> {
     if matches!(
-      *self.controls.next_source.lock().await,
-      NextSourceState::None
+      *self.controls.source_queue.lock().await,
+      SourceQueueState::None
     ) {
       return Ok(());
     }
