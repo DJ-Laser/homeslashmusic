@@ -1,32 +1,53 @@
-use std::{mem, sync::Arc, time::Duration};
+use std::{fmt::Debug, mem, sync::Arc, time::Duration};
 
 use rodio::{Sample, Source, source};
 
 use super::Controls;
 
-pub enum NextSourceState {
+pub enum SourceQueueState {
   Queued(Box<dyn Source + Send>),
   Playing,
   None,
 }
 
-impl NextSourceState {
-  pub fn clear(&mut self) -> Self {
-    mem::replace(self, Self::None)
+impl Debug for SourceQueueState {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    match self {
+      Self::Queued(_) => write!(f, "Queued(Box<dyn Source>)"),
+      Self::Playing => write!(f, "Playing"),
+      Self::None => write!(f, "None"),
+    }
+  }
+}
+
+impl SourceQueueState {
+  pub fn is_queued(&self) -> bool {
+    return matches!(self, Self::Queued(_));
   }
 
-  fn consume(&mut self) -> Option<Box<dyn Source + Send>> {
+  pub fn is_playing(&self) -> bool {
+    return !matches!(self, Self::None);
+  }
+
+  pub fn invalidate(&mut self) {
+    match self {
+      Self::Queued(_) => *self = Self::Playing,
+      Self::Playing | Self::None => (),
+    }
+  }
+
+  pub fn consume(&mut self) -> Option<Box<dyn Source + Send>> {
     match self {
       Self::Queued(_) => {
         let state = mem::replace(self, Self::Playing);
-        let NextSourceState::Queued(source) = state else {
-          unreachable!("Moved out of a NextSourceState::Queued")
+        let Self::Queued(source) = state else {
+          unreachable!("Moved out of a SourceQueueState::Queued")
         };
 
         Some(source)
       }
       Self::Playing => {
-        self.clear();
+        *self = Self::None;
         None
       }
       Self::None => None,
@@ -51,7 +72,7 @@ impl PlayerAudioOutput {
 
   fn load_next(&mut self) {
     self.current = {
-      let mut next = self.controls.next_source.lock_blocking();
+      let mut next = self.controls.source_queue.lock_blocking();
 
       match next.consume() {
         Some(next) => next,

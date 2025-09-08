@@ -28,8 +28,7 @@ pub enum SeekPosition {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InsertPosition {
   Absolute(usize),
-  /// relative to current: `0` for current, `1` for next, etc
-  Relative(isize),
+  Next,
   Start,
   End,
   /// Clear the current track list before inserting
@@ -40,7 +39,7 @@ impl InsertPosition {
   pub fn get_absolute(&self, current_position: usize, track_list_len: usize) -> usize {
     let position = match self {
       InsertPosition::Absolute(position) => *position,
-      InsertPosition::Relative(delta) => current_position.saturating_add_signed(*delta),
+      InsertPosition::Next => current_position.saturating_add_signed(1),
       InsertPosition::Start => 0,
       InsertPosition::End => track_list_len,
       InsertPosition::Replace => 0,

@@ -11,8 +11,7 @@ use async_oneshot as oneshot;
 use controlled_source::{SeekError, SourceEvent, wrap_source};
 use decoder::TrackDecoder;
 use hsm_ipc::{InsertPosition, LoopMode, PlaybackState, SeekPosition, Track};
-use output::NextSourceState;
-use rand::seq::SliceRandom;
+use output::SourceQueueState;
 use rodio::{Source, mixer::Mixer};
 use smol::{
   channel::{self, Receiver, Sender},
@@ -21,6 +20,7 @@ use smol::{
 
 use atomic_control_status::{AtomicLoopMode, AtomicPlaybackState};
 use thiserror::Error;
+use track_list::TrackList;
 
 use super::{event::Event, track::LoadTrackError};
 pub use output::PlayerAudioOutput;
@@ -29,6 +29,7 @@ mod atomic_control_status;
 mod controlled_source;
 mod decoder;
 mod output;
+mod track_list;
 
 struct Controls {
   pub playback_state: AtomicPlaybackState,
@@ -37,11 +38,11 @@ struct Controls {
   pub to_skip: AtomicUsize,
   pub position: Mutex<Duration>,
   pub seek_position: Mutex<Option<(SeekPosition, oneshot::Sender<Result<(), SeekError>>)>>,
-  pub next_source: Mutex<NextSourceState>,
+  pub source_queue: Mutex<SourceQueueState>,
 }
 
 impl Controls {
-  pub fn new() -> Self {
+  fn new() -> Self {
     Self {
       playback_state: AtomicPlaybackState::new(PlaybackState::Stopped),
       loop_mode: AtomicLoopMode::new(LoopMode::None),
@@ -49,7 +50,7 @@ impl Controls {
       volume: Mutex::new(1.0),
       position: Mutex::new(Duration::ZERO),
       seek_position: Mutex::new(None),
-      next_source: Mutex::new(NextSourceState::None),
+      source_queue: Mutex::new(SourceQueueState::None),
     }
   }
 }
@@ -67,9 +68,6 @@ pub enum PlayerError {
   #[error("Failed to load track: {0}")]
   LoadTrack(#[from] LoadTrackError),
 
-  #[error("Shuffle failed, could not determine new current track position")]
-  ShuffleFailedNoCurrentTrack,
-
   #[error("failed to seek: ")]
   SeekFailed(#[from] SeekError),
 }
@@ -79,16 +77,14 @@ impl PlayerError {
     match self {
       Self::LoadTrack(_) => true,
       Self::SeekFailed(_) => true,
-      Self::ShuffleFailedNoCurrentTrack => true,
       _ => false,
     }
   }
 }
 
 pub struct Player {
-  track_list: Mutex<Vec<Arc<Track>>>,
-  current_index: AtomicUsize,
-  shuffle_order: Mutex<Option<Vec<usize>>>,
+  tracks: TrackList,
+  current_track_index: AtomicUsize,
 
   controls: Arc<Controls>,
   event_tx: Sender<Event>,
@@ -107,9 +103,8 @@ impl Player {
     let (source_tx, source_rx) = channel::unbounded();
 
     let player = Self {
-      track_list: Mutex::new(Vec::new()),
-      current_index: AtomicUsize::new(0),
-      shuffle_order: Mutex::new(None),
+      tracks: TrackList::new(),
+      current_track_index: AtomicUsize::new(0),
 
       controls: Arc::new(Controls::new()),
       event_tx,
@@ -129,77 +124,111 @@ impl Player {
       .map_err(|_| PlayerError::EventChannelClosed)
   }
 
-  fn wrap_source(&self, source: impl Source + 'static) -> impl Source + 'static {
-    wrap_source(source, self.controls.clone(), self.source_tx.clone())
+  async fn load_track_source(
+    &self,
+    track: &Arc<Track>,
+  ) -> Result<Box<dyn Source + Send + 'static>, LoadTrackError> {
+    let decoder = TrackDecoder::new(track.as_ref().clone()).await?;
+
+    Ok(Box::new(wrap_source(
+      decoder,
+      self.controls.clone(),
+      self.source_tx.clone(),
+    )))
   }
 
   async fn clear_source_queue(&self) {
-    let prev_source = self.controls.next_source.lock().await.clear();
+    let mut source_queue = self.controls.source_queue.lock().await;
 
-    if !matches!(prev_source, NextSourceState::None) {
+    if source_queue.is_playing() {
+      source_queue.invalidate();
       self.controls.to_skip.fetch_add(1, Ordering::AcqRel);
     }
   }
 
-  async fn queue_track(&self, track: &Arc<Track>) -> Result<(), LoadTrackError> {
-    let source = self.wrap_source(TrackDecoder::new(track.as_ref().clone()).await?);
-    *self.controls.next_source.lock().await = NextSourceState::Queued(Box::new(source));
+  /// If `wait_for_empty_queue` is true, this function will loop until the queue become open for replacement
+  /// If it is not ensured that the queue is empty beforehand it can cause an infinite loop and lockup
+  async fn queue_track(
+    &self,
+    track: &Arc<Track>,
+    wait_for_empty_queue: bool,
+  ) -> Result<(), LoadTrackError> {
+    let source = self.load_track_source(track).await?;
+    let mut source_queue = self.controls.source_queue.lock().await;
+
+    while !wait_for_empty_queue && source_queue.is_queued() {
+      // Unlock the queue mutex
+      mem::drop(source_queue);
+
+      smol::Timer::after(controlled_source::SOURCE_UPDATE_INTERVAL * 3).await;
+      source_queue = self.controls.source_queue.lock().await;
+    }
+
+    source_queue.invalidate();
+    *source_queue = SourceQueueState::Queued(source);
 
     Ok(())
   }
 
-  async fn get_shuffled_index(&self) -> usize {
-    let current_index = self.current_index.load(Ordering::Acquire);
-    self
-      .shuffle_order
-      .lock()
-      .await
-      .as_ref()
-      .and_then(|order| order.get(current_index).cloned())
-      .unwrap_or(current_index)
-  }
-
   /// Returns true if there was a current track to queue
-  async fn requeue_current_track(&self) -> Result<bool, LoadTrackError> {
-    self.clear_source_queue().await;
-    let tracks = self.track_list.lock().await;
-    if tracks.len() == 0 {
+  ///
+  /// If `use_queued` is true this function will use the source waiting in queue instead of reloading the current track
+  /// Because this function queues the next track, `use_queued` should only be true if the `current_track_index` is exactly one more
+  /// than the last call to `queue_current_track`
+  async fn queue_current_track(&self, use_queued: bool) -> Result<bool, LoadTrackError> {
+    let Some((current_track, next_track)) = self
+      .tracks
+      .get_tracks_to_queue(self.current_track_index.load(Ordering::Acquire))
+      .await
+    else {
       return Ok(false);
+    };
+
+    let load_necessary = {
+      let mut source_queue = self.controls.source_queue.lock().await;
+      match *source_queue {
+        // Skip the current track so the queued one plays
+        SourceQueueState::Queued(_) => {
+          self.controls.to_skip.fetch_add(1, Ordering::AcqRel);
+          if !use_queued {
+            source_queue.invalidate();
+          }
+
+          !use_queued
+        }
+
+        // No queued track means the current track ended and the next (queued) track began playing
+        // If `use_queued` is false skip and load a new track
+        SourceQueueState::Playing => {
+          if !use_queued {
+            self.controls.to_skip.fetch_add(1, Ordering::AcqRel);
+          }
+
+          !use_queued
+        }
+
+        // No track playing, load the current track
+        SourceQueueState::None => true,
+      }
+    };
+
+    if load_necessary {
+      self.queue_track(&current_track, true).await?;
     }
 
-    let track_index = self.get_shuffled_index().await;
-    self.queue_track(&tracks[track_index]).await?;
+    if let Some(next_track) = next_track {
+      self.queue_track(&next_track, false).await?;
+    }
 
     Ok(true)
   }
 
-  async fn shuffle_tracks(&self) -> Result<(), PlayerError> {
-    let num_tracks = self.track_list.lock().await.len();
-    let current_track_index = self.get_shuffled_index().await;
-    if num_tracks == 0 {
-      *self.shuffle_order.lock().await = Some(Vec::new());
-      return Ok(());
-    }
-
-    let mut shuffle_order: Vec<_> = (0..num_tracks).collect();
-    shuffle_order.shuffle(&mut rand::rng());
-
-    let new_current_index = shuffle_order
-      .iter()
-      .position(|track_index| *track_index == current_track_index)
-      .ok_or(PlayerError::ShuffleFailedNoCurrentTrack)?;
-    self
-      .current_index
-      .store(new_current_index, Ordering::Release);
-
-    *self.shuffle_order.lock().await = Some(shuffle_order);
-    println!("Shuffled track order");
-
-    Ok(())
+  pub fn playback_state(&self) -> PlaybackState {
+    self.controls.playback_state.load(Ordering::Acquire)
   }
 
-  pub fn playback_state(&self) -> PlaybackState {
-    self.controls.playback_state.load(Ordering::Relaxed)
+  fn is_stopped(&self) -> bool {
+    matches!(self.playback_state(), PlaybackState::Stopped)
   }
 
   fn set_playback_state(&self, new_state: PlaybackState) -> Result<PlaybackState, PlayerError> {
@@ -216,11 +245,8 @@ impl Player {
   }
 
   pub async fn play(&self) -> Result<(), PlayerError> {
-    if matches!(
-      self.controls.playback_state.load(Ordering::Acquire),
-      PlaybackState::Stopped
-    ) {
-      let had_tracks = self.requeue_current_track().await?;
+    if self.is_stopped() {
+      let had_tracks = self.queue_current_track(true).await?;
       if !had_tracks {
         return Ok(());
       }
@@ -263,7 +289,6 @@ impl Player {
     let printed_position = if reverse { "beginning" } else { "end" };
     let printed_loop_position = if reverse { "end" } else { "beginning" };
 
-    let tracks = self.track_list.lock().await;
     let should_loop = !matches!(
       self.controls.loop_mode.load(Ordering::Acquire),
       LoopMode::None
@@ -271,39 +296,40 @@ impl Player {
 
     // Don't skip to end if loop is off
     let new_index = if should_loop && reverse {
-      tracks.len() - 1
+      self.tracks.len() - 1
     } else {
       0
     };
 
-    self.current_index.store(new_index, Ordering::Release);
+    self.current_track_index.store(new_index, Ordering::Release);
 
-    if !should_loop || tracks.len() == 0 {
+    if !should_loop {
       println!("Track list reached {printed_position}, stopping");
       self.stop().await?;
     } else {
       println!("Track list reached {printed_position}, looping to {printed_loop_position}");
 
-      // Drop tracks guard to prevent deadlock
-      mem::drop(tracks);
-      self.requeue_current_track().await?;
+      if !self.is_stopped() {
+        self.queue_current_track(false).await?;
+      }
     };
 
     Ok(())
   }
 
   pub async fn go_to_next_track(&self) -> Result<(), PlayerError> {
-    let tracks = self.track_list.lock().await;
-    let new_index = 1 + self.current_index.fetch_add(1, Ordering::Release);
-    let wrap_needed = new_index >= tracks.len();
+    let new_index = 1 + self.current_track_index.fetch_add(1, Ordering::Release);
 
-    // Drop tracks guard to prevent deadlock
-    mem::drop(tracks);
+    if self.is_stopped() {
+      if new_index >= self.tracks.len() {
+        self.stop_or_wrap_track(false).await?;
+      }
 
-    if wrap_needed {
+      return Ok(());
+    }
+
+    if !self.queue_current_track(true).await? {
       self.stop_or_wrap_track(false).await?;
-    } else {
-      self.requeue_current_track().await?;
     }
 
     Ok(())
@@ -315,15 +341,18 @@ impl Player {
     if soft && self.position().await > RESTART_THRESHOLD {
       self.seek(SeekPosition::To(Duration::ZERO)).await
     } else {
-      let current_index = self.current_index.load(Ordering::Acquire);
+      let current_index = self.current_track_index.load(Ordering::Acquire);
 
       if current_index == 0 {
         self.stop_or_wrap_track(true).await?;
       } else {
         self
-          .current_index
+          .current_track_index
           .store(current_index - 1, Ordering::Release);
-        self.requeue_current_track().await?;
+
+        if !self.is_stopped() {
+          self.queue_current_track(false).await?;
+        }
       }
 
       Ok(())
@@ -331,18 +360,28 @@ impl Player {
   }
 
   pub async fn shuffle(&self) -> bool {
-    self.shuffle_order.lock().await.is_some()
+    self.tracks.shuffle_enabled()
   }
 
   pub async fn set_shuffle(&self, shuffle: bool) -> Result<(), PlayerError> {
-    let prev_shuffle = self.shuffle_order.lock().await.take().is_some();
+    let prev_shuffle = self.shuffle().await;
     if shuffle != prev_shuffle {
-      if shuffle {
-        self.shuffle_tracks().await?;
-      }
+      let current_index = self.current_track_index.load(Ordering::Acquire);
+      let new_index = self.tracks.set_shuffle(shuffle, current_index).await?;
+
+      self.current_track_index.store(new_index, Ordering::Release);
 
       self.emit(Event::ShuffleChanged(shuffle))?;
       println!("Shuffle set to {shuffle}");
+
+      if !self.is_stopped() {
+        let current_track_index = self.current_track_index.load(Ordering::Acquire);
+        if let Some((_, Some(next_track))) =
+          self.tracks.get_tracks_to_queue(current_track_index).await
+        {
+          self.queue_track(&next_track, true).await?;
+        }
+      }
     }
 
     Ok(())
@@ -389,8 +428,8 @@ impl Player {
 
   pub async fn seek(&self, seek_position: SeekPosition) -> Result<(), PlayerError> {
     if matches!(
-      *self.controls.next_source.lock().await,
-      NextSourceState::None
+      *self.controls.source_queue.lock().await,
+      SourceQueueState::None
     ) {
       return Ok(());
     }
@@ -405,70 +444,42 @@ impl Player {
   }
 
   pub async fn current_track(&self) -> Option<Arc<Track>> {
-    let tracks = self.track_list.lock().await;
-    let track_index = self.get_shuffled_index().await;
-    tracks.get(track_index).map(|track| track.clone())
+    self
+      .tracks
+      .get_track(self.current_track_index.load(Ordering::Acquire))
+      .await
+  }
+
+  pub async fn clear_tracks(&self) -> Result<(), PlayerError> {
+    self.stop().await?;
+    self.tracks.clear().await?;
+    self.current_track_index.store(0, Ordering::Release);
+    println!("Clearing track list");
+
+    Ok(())
   }
 
   /// Inserts new tracks at a specified position in the track list
   pub async fn insert_tracks(
     &self,
     position: InsertPosition,
-    new_tracks: &[Arc<Track>],
+    tracks: &[Arc<Track>],
   ) -> Result<(), PlayerError> {
-    if matches!(position, InsertPosition::Replace) {
-      self.clear_tracks().await?;
+    let current_index = self.current_track_index.load(Ordering::Acquire);
+
+    let new_current_index = self
+      .tracks
+      .insert_tracks(current_index, position, tracks)
+      .await?;
+
+    self
+      .current_track_index
+      .store(new_current_index, Ordering::Release);
+
+    // If the track list was replaced, a new song must begin playing
+    if matches!(position, InsertPosition::Replace) && !self.is_stopped() {
+      self.queue_current_track(false).await?;
     }
-
-    let shuffle = self.shuffle().await;
-    let mut tracks = self.track_list.lock().await;
-
-    // If shuffle is enabled, don't do relative insertion and default to end
-    let current_index = if !shuffle {
-      self.current_index.load(Ordering::Acquire)
-    } else {
-      tracks.len()
-    };
-
-    let mut track_index = position.get_absolute(current_index, tracks.len());
-
-    let current_track_changed = matches!(position, InsertPosition::Relative(0));
-    if tracks.len() > 0 && track_index <= current_index && !current_track_changed {
-      // If the track was instered before the current one, increment the index to keep the same track playing
-      self
-        .current_index
-        .fetch_add(new_tracks.len(), Ordering::Release);
-    }
-
-    for track in new_tracks {
-      tracks.insert(track_index, track.clone());
-      track_index += 1;
-    }
-
-    // Drop tracks lock to prevent deadlock
-    mem::drop(tracks);
-
-    if shuffle {
-      self.shuffle_tracks().await?;
-    }
-
-    if current_track_changed
-      && !matches!(
-        self.controls.playback_state.load(Ordering::Acquire),
-        PlaybackState::Stopped
-      )
-    {
-      self.requeue_current_track().await?;
-    }
-
-    Ok(())
-  }
-
-  pub async fn clear_tracks(&self) -> Result<(), PlayerError> {
-    self.stop().await?;
-    *self.track_list.lock().await = Vec::new();
-    self.current_index.store(0, Ordering::Release);
-    println!("Clearing track list");
 
     Ok(())
   }

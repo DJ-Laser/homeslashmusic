@@ -136,10 +136,11 @@ impl AudioServer {
 
         let _ = error_tx.send(errors);
 
-        self.player.insert_tracks(position, &tracks).await?;
-        for track in tracks {
+        for track in tracks.iter() {
           println!("Loaded track {:?}", track.file_path());
         }
+
+        self.player.insert_tracks(position, &tracks).await?;
       }
 
       Message::ClearTracks => self.player.clear_tracks().await?,

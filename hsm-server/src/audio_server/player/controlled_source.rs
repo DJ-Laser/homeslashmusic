@@ -11,7 +11,7 @@ use rodio::{
 use smol::channel::Sender;
 use thiserror::Error;
 
-use super::{Controls, LoopMode, PlaybackState, output::NextSourceState};
+use super::{Controls, LoopMode, PlaybackState, output::SourceQueueState};
 
 pub enum SourceEvent {
   Seeked(Duration),
@@ -34,7 +34,7 @@ impl SourceEvent {
 
 type WrappedSourceInner<S> = ControlledSource<Pausable<Amplify<TrackPosition<S>>>>;
 
-const SOURCE_UPDATE_INTERVAL: Duration = Duration::from_millis(5);
+pub const SOURCE_UPDATE_INTERVAL: Duration = Duration::from_millis(5);
 
 pub struct ControlledSource<I> {
   input: I,
@@ -61,9 +61,9 @@ where
   }
 
   fn clear_playing_source(&self) {
-    let mut next_source = self.controls.next_source.lock_blocking();
-    if matches!(*next_source, NextSourceState::Playing) {
-      *next_source = NextSourceState::None;
+    let mut next_source = self.controls.source_queue.lock_blocking();
+    if matches!(*next_source, SourceQueueState::Playing) {
+      *next_source = SourceQueueState::None;
     }
   }
 }
