@@ -24,8 +24,6 @@ pub(crate) struct TrackDecoder {
 
 impl TrackDecoder {
   pub async fn new(track: Track) -> Result<Self, LoadTrackError> {
-    println!("Delaying track decoder");
-    smol::Timer::after(Duration::from_secs(1)).await;
     smol::unblock(|| Self::new_sync(track)).await
   }
 
