@@ -1,4 +1,5 @@
 use std::{
+  mem,
   sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
@@ -123,28 +124,58 @@ impl Player {
       .map_err(|_| PlayerError::EventChannelClosed)
   }
 
-  fn wrap_source(&self, source: impl Source + 'static) -> impl Source + 'static {
-    wrap_source(source, self.controls.clone(), self.source_tx.clone())
+  async fn load_track_source(
+    &self,
+    track: &Arc<Track>,
+  ) -> Result<Box<dyn Source + Send + 'static>, LoadTrackError> {
+    let decoder = TrackDecoder::new(track.as_ref().clone()).await?;
+
+    Ok(Box::new(wrap_source(
+      decoder,
+      self.controls.clone(),
+      self.source_tx.clone(),
+    )))
   }
 
-  async fn clear_source_queue(&self) {
-    let prev_source = self.controls.next_source.lock().await.clear();
+  /// Updates the source_queue based on `replace_fn`
+  /// `replace_fn` returns an Optional track to load and a bool determining whether to skip the current source
+  async fn replace_source_queue<'s, 'a, F>(&'s self, replace_fn: F) -> Result<(), LoadTrackError>
+  where
+    F: FnOnce(&NextSourceState) -> (Option<&'a Arc<Track>>, bool),
+    'a: 's,
+  {
+    let mut source_queue = self.controls.next_source.lock().await;
+    let (replace_with, skip_current) = replace_fn(&source_queue);
 
-    if !matches!(prev_source, NextSourceState::None) {
+    if let Some(track) = replace_with {
+      // Unlock mutex while loading next source
+      mem::drop(source_queue);
+      let source = self.load_track_source(track).await?;
+
+      source_queue = self.controls.next_source.lock().await;
+      *source_queue = NextSourceState::Queued(source);
+    }
+
+    if skip_current && !matches!(*source_queue, NextSourceState::None) {
       self.controls.to_skip.fetch_add(1, Ordering::AcqRel);
     }
-  }
-
-  async fn queue_track(&self, track: &Arc<Track>) -> Result<(), LoadTrackError> {
-    let source = self.wrap_source(TrackDecoder::new(track.as_ref().clone()).await?);
-    *self.controls.next_source.lock().await = NextSourceState::Queued(Box::new(source));
 
     Ok(())
   }
 
+  async fn clear_source_queue(&self) {
+    self
+      .replace_source_queue(|_| (None, true))
+      .await
+      .expect("Track loading can't fail if no track is provided to be loaded");
+  }
+
   /// Returns true if there was a current track to queue
-  async fn requeue_current_track(&self) -> Result<bool, LoadTrackError> {
-    self.clear_source_queue().await;
+  ///
+  /// If `use_queued` is true this function will use the source waiting in queue instead of reloading the current track
+  /// Because this function queues the next track, `use_queued` should only be true if the `current_track_index` is exactly one more
+  /// than the last call to `queue_current_track`
+  async fn queue_current_track(&self, use_queued: bool) -> Result<bool, LoadTrackError> {
     let Some((current_track, next_track)) = self
       .tracks
       .get_tracks_to_queue(self.current_track_index.load(Ordering::Acquire))
@@ -153,9 +184,43 @@ impl Player {
       return Ok(false);
     };
 
-    self.queue_track(&current_track).await?;
+    self
+      .replace_source_queue(|source_queue| {
+        if !use_queued {
+          return (Some(&current_track), true);
+        }
+
+        match source_queue {
+          // Skip the current track so the queued one plays
+          NextSourceState::Queued(_) => (None, true),
+
+          // No queued track means the current track ended and the next (queued) track began playing
+          NextSourceState::Playing => (None, false),
+
+          // No track playing, load the current track
+          NextSourceState::None => (Some(&current_track), false),
+        }
+      })
+      .await?;
+
     if let Some(next_track) = next_track {
-      self.queue_track(&next_track).await?
+      let mut next_track_queued = false;
+      while !next_track_queued {
+        self
+          .replace_source_queue(|source_queue| {
+            match source_queue {
+              // Current track not playing yet
+              NextSourceState::Queued(_) => (None, false),
+
+              // Current track began, queue next
+              NextSourceState::Playing | NextSourceState::None => {
+                next_track_queued = true;
+                (Some(&next_track), false)
+              }
+            }
+          })
+          .await?;
+      }
     }
 
     Ok(true)
@@ -183,7 +248,7 @@ impl Player {
       self.controls.playback_state.load(Ordering::Acquire),
       PlaybackState::Stopped
     ) {
-      let had_tracks = self.requeue_current_track().await?;
+      let had_tracks = self.queue_current_track(true).await?;
       if !had_tracks {
         return Ok(());
       }
@@ -246,7 +311,7 @@ impl Player {
     } else {
       println!("Track list reached {printed_position}, looping to {printed_loop_position}");
 
-      self.requeue_current_track().await?;
+      self.queue_current_track(false).await?;
     };
 
     Ok(())
@@ -255,7 +320,7 @@ impl Player {
   pub async fn go_to_next_track(&self) -> Result<(), PlayerError> {
     self.current_track_index.fetch_add(1, Ordering::Release);
 
-    if !self.requeue_current_track().await? {
+    if !self.queue_current_track(true).await? {
       self.stop_or_wrap_track(false).await?;
     }
 
@@ -276,7 +341,7 @@ impl Player {
         self
           .current_track_index
           .store(current_index - 1, Ordering::Release);
-        self.requeue_current_track().await?;
+        self.queue_current_track(false).await?;
       }
 
       Ok(())
@@ -392,7 +457,7 @@ impl Player {
     if matches!(position, InsertPosition::Replace)
       && !matches!(self.playback_state(), PlaybackState::Stopped)
     {
-      self.requeue_current_track().await?;
+      self.queue_current_track(false).await?;
     }
 
     Ok(())

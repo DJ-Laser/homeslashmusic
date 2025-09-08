@@ -1,4 +1,4 @@
-use std::{mem, sync::Arc, time::Duration};
+use std::{fmt::Debug, mem, sync::Arc, time::Duration};
 
 use rodio::{Sample, Source, source};
 
@@ -10,8 +10,18 @@ pub enum NextSourceState {
   None,
 }
 
+impl Debug for NextSourceState {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    match self {
+      Self::Queued(_) => write!(f, "Queued(Box<dyn Source>)"),
+      Self::Playing => write!(f, "Playing"),
+      Self::None => write!(f, "None"),
+    }
+  }
+}
+
 impl NextSourceState {
-  pub fn clear(&mut self) -> Self {
+  pub fn take(&mut self) -> Self {
     mem::replace(self, Self::None)
   }
 
@@ -26,7 +36,7 @@ impl NextSourceState {
         Some(source)
       }
       Self::Playing => {
-        self.clear();
+        self.take();
         None
       }
       Self::None => None,
