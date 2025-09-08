@@ -1,89 +1,31 @@
-use std::path::{self, PathBuf};
+use std::io;
 
 use clap::Parser;
-use cli::{Cli, Command, QueueCommand};
-use hsm_ipc::{InsertPosition, requests};
-use ipc::send_request;
+use thiserror::Error;
+
+use cli::Cli;
+use commands::handle_command;
 
 mod cli;
-mod error;
+mod commands;
 mod ipc;
 
-pub use error::Error;
+#[derive(Debug, Error)]
+pub enum Error {
+  #[error("Could not connect to socket {path}")]
+  FailedToConnectToSocket { path: String, source: io::Error },
 
-type StandardReply = Result<(), String>;
+  #[error("Error communicating with server")]
+  StreamReadWrite(#[source] io::Error),
 
-fn try_load_tracks(
-  position: InsertPosition,
-  paths: &[PathBuf],
-) -> Result<StandardReply, crate::Error> {
-  let mut absolute_paths = Vec::new();
-  for path in paths {
-    absolute_paths.push(path::absolute(path).map_err(crate::Error::GetCurrentDirFailed)?);
-  }
+  #[error("Failed to get the working directory: {0}")]
+  GetCurrentDirFailed(io::Error),
 
-  let res = send_request(requests::LoadTracks(position, absolute_paths))?;
+  #[error("Failed to deserialize reply from server")]
+  Deserialize(#[source] serde_json::Error),
 
-  Ok(res.map(|errors| {
-    for (path, error) in errors {
-      eprintln!("Failed to load track {path:?}: {error}")
-    }
-  }))
-}
-
-fn handle_queue_command(command: QueueCommand) -> Result<StandardReply, crate::Error> {
-  let res = match command {
-    QueueCommand::Clear => send_request(requests::ClearTracks)?,
-    QueueCommand::Replace { tracks } => try_load_tracks(InsertPosition::Replace, &tracks.paths)?,
-    QueueCommand::Add { tracks } => try_load_tracks(InsertPosition::End, &tracks.paths)?,
-    QueueCommand::Next { tracks } => try_load_tracks(InsertPosition::Next, &tracks.paths)?,
-  };
-
-  Ok(res)
-}
-
-fn handle_command(command: Cli) -> Result<(), crate::Error> {
-  let reply: Result<(), String> = match command.command {
-    Command::Play { tracks } => {
-      let res = if let Some(tracks) = tracks {
-        try_load_tracks(InsertPosition::Replace, &tracks.paths)?
-      } else {
-        Ok(())
-      };
-
-      match res {
-        Ok(()) => send_request(requests::Play)?,
-        Err(error) => Err(error),
-      }
-    }
-    Command::Pause => send_request(requests::Pause)?,
-    Command::PlayPause => send_request(requests::TogglePlayback)?,
-    Command::Stop => send_request(requests::StopPlayback)?,
-
-    Command::Next => send_request(requests::NextTrack)?,
-    Command::Previous => send_request(requests::PreviousTrack { soft: true })?,
-
-    Command::Loop { loop_mode } => send_request(requests::SetLoopMode(loop_mode.into()))?,
-    Command::Shuffle { shuffle } => send_request(requests::SetShuffle(shuffle.into()))?,
-    Command::Volume { volume } => send_request(requests::SetVolume(volume))?,
-
-    Command::Seek { seek_position } => send_request(requests::Seek(seek_position))?,
-
-    Command::Queue { command, tracks } => {
-      if let Some(command) = command {
-        handle_queue_command(command)?
-      } else if let Some(tracks) = tracks {
-        handle_queue_command(QueueCommand::Add { tracks })?
-      } else {
-        unreachable!("Parser requires either command or tracks")
-      }
-    }
-  };
-
-  if let Err(message) = reply {
-    return Err(crate::Error::Server(message));
-  }
-  Ok(())
+  #[error("Error: {0}")]
+  Server(String),
 }
 
 fn main() -> Result<(), crate::Error> {

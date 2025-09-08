@@ -25,13 +25,13 @@ pub enum Command {
   Previous,
 
   Volume {
-    volume: f32,
+    volume: Option<f32>,
   },
   Loop {
-    loop_mode: LoopMode,
+    loop_mode: Option<LoopMode>,
   },
   Shuffle {
-    shuffle: ShuffleMode,
+    shuffle: Option<ShuffleMode>,
   },
 
   Seek {

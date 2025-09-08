@@ -1,4 +1,4 @@
-use std::ops::Index;
+use std::{iter::FusedIterator, ops::Index};
 
 use serde::{Deserialize, Serialize};
 
@@ -142,6 +142,10 @@ impl TrackList {
 
     Ok(())
   }
+
+  pub fn iter(&self) -> TrackListIter {
+    TrackListIter::new(self)
+  }
 }
 
 impl Index<usize> for TrackList {
@@ -152,3 +156,31 @@ impl Index<usize> for TrackList {
     &self.track_list[self.shuffle_indicies[index]]
   }
 }
+
+pub struct TrackListIter<'a> {
+  track_list: &'a TrackList,
+  index: usize,
+}
+
+impl<'a> TrackListIter<'a> {
+  fn new(track_list: &'a TrackList) -> Self {
+    Self {
+      track_list,
+      index: 0,
+    }
+  }
+}
+
+impl<'a> Iterator for TrackListIter<'a> {
+  type Item = &'a Track;
+
+  fn next(&mut self) -> Option<Self::Item> {
+    if self.index >= self.track_list.len() {
+      return None;
+    }
+
+    Some((&self.track_list[self.index], self.index += 1).0)
+  }
+}
+
+impl<'a> FusedIterator for TrackListIter<'a> {}
