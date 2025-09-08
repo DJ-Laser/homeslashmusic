@@ -27,12 +27,15 @@ impl TrackListInner {
   }
 
   pub fn clear(&mut self) {
+    debug_assert_eq!(self.track_list.len(), self.track_list.len());
+
     self.track_list.clear();
     self.shuffled_track_indicies.clear();
   }
 
   pub fn len(&self) -> usize {
     debug_assert_eq!(self.track_list.len(), self.track_list.len());
+
     self.track_list.len()
   }
 
@@ -59,11 +62,27 @@ impl TrackListInner {
     index..index + tracks.len()
   }
 
-  fn shuffle_tracks(&mut self, rng: &mut impl Rng) {
+  /// Shuffles the `shuffled_track_indicies`
+  ///
+  /// Returns the new index of `current_index`
+  /// Currently `current_index` will always be moved to index 0
+  fn shuffle_tracks(&mut self, current_index: usize, rng: &mut impl Rng) -> usize {
+    debug_assert_eq!(self.track_list.len(), self.track_list.len());
+
+    let current_track = self.shuffled_track_indicies.remove(current_index);
     self.shuffled_track_indicies.shuffle(rng);
+
+    let new_index = 0;
+    self
+      .shuffled_track_indicies
+      .insert(new_index, current_track);
+
+    new_index
   }
 
   fn order_tracks(&mut self) {
+    debug_assert_eq!(self.track_list.len(), self.track_list.len());
+
     self.shuffled_track_indicies.clear();
     self
       .shuffled_track_indicies
@@ -76,6 +95,7 @@ impl Index<usize> for TrackListInner {
 
   fn index(&self, index: usize) -> &Self::Output {
     debug_assert_eq!(self.track_list.len(), self.track_list.len());
+
     &self.track_list[self.shuffled_track_indicies[index]]
   }
 }
@@ -142,18 +162,26 @@ impl TrackList {
     self.shuffle_enabled.load(Ordering::Acquire)
   }
 
-  pub async fn set_shuffle(&self, shuffle: bool) -> Result<(), PlayerError> {
+  /// Returns the new position of `current_index` after the shuffle/order
+  pub async fn set_shuffle(
+    &self,
+    shuffle: bool,
+    current_index: usize,
+  ) -> Result<usize, PlayerError> {
     let mut inner = self.inner.lock().await;
-
-    if shuffle {
-      inner.shuffle_tracks(&mut rand::rng());
-    } else {
-      inner.order_tracks();
-    }
-
     self.shuffle_enabled.store(shuffle, Ordering::Release);
 
-    Ok(())
+    if shuffle {
+      let new_index = inner.shuffle_tracks(current_index, &mut rand::rng());
+
+      Ok(new_index)
+    } else {
+      // After `order_tracks` is run `shuffled_track_indicies` maps exactly to `track_list`
+      let track_index = inner.shuffled_track_indicies[current_index];
+
+      inner.order_tracks();
+      Ok(track_index)
+    }
   }
 
   pub async fn clear(&self) -> Result<(), PlayerError> {
@@ -197,7 +225,7 @@ impl TrackList {
 
       // Move new shuffle indicies to random locations
       for shuffle_index in shuffle_indicies {
-        let new_index = rng.random_range(0..shuffled_track_indicies.len());
+        let new_index = rng.random_range(0..=shuffled_track_indicies.len());
 
         shuffled_track_indicies.insert(new_index, shuffle_index);
         if new_index <= new_current_index {

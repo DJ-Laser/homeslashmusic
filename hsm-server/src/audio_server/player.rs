@@ -355,7 +355,10 @@ impl Player {
   pub async fn set_shuffle(&self, shuffle: bool) -> Result<(), PlayerError> {
     let prev_shuffle = self.shuffle().await;
     if shuffle != prev_shuffle {
-      self.tracks.set_shuffle(shuffle).await?;
+      let current_index = self.current_track_index.load(Ordering::Acquire);
+      let new_index = self.tracks.set_shuffle(shuffle, current_index).await?;
+
+      self.current_track_index.store(new_index, Ordering::Release);
 
       self.emit(Event::ShuffleChanged(shuffle))?;
       println!("Shuffle set to {shuffle}");
