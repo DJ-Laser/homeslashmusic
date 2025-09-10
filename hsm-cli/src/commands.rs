@@ -2,7 +2,8 @@ use std::path::{self, PathBuf};
 
 use crate::cli::{Cli, Command, QueueCommand};
 use crate::ipc::send_request;
-use hsm_ipc::{InsertPosition, LoopMode, client::TrackList, requests};
+use hsm_client::track_list::TrackList;
+use hsm_ipc::{InsertPosition, LoopMode, TrackListSnapshot, requests};
 
 fn try_load_tracks(position: InsertPosition, paths: &[PathBuf]) -> Result<(), crate::Error> {
   let mut absolute_paths = Vec::new();
@@ -30,7 +31,9 @@ fn handle_queue_command(command: QueueCommand) -> Result<(), crate::Error> {
   Ok(())
 }
 
-fn print_track_list(track_list: &TrackList) {
+fn print_track_list(snapshot: TrackListSnapshot) {
+  let track_list = TrackList::from_snapshot(snapshot);
+
   if track_list.len() == 0 {
     println!("No tracks loaded");
   }
@@ -104,7 +107,7 @@ pub fn handle_command(command: Cli) -> Result<(), crate::Error> {
         handle_queue_command(QueueCommand::Add { tracks })?
       } else {
         let track_list = send_request(requests::QueryTrackList)?;
-        print_track_list(&track_list);
+        print_track_list(track_list);
       }
     }
   };

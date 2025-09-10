@@ -1,0 +1,10 @@
+[package]
+name = "hsm-client"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+hsm-ipc.workspace = true
+
+serde.workspace = true
+serde_json.workspace = true

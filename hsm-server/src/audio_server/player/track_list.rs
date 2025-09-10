@@ -6,7 +6,7 @@ use std::{
   },
 };
 
-use hsm_ipc::{InsertPosition, Track};
+use hsm_ipc::{InsertPosition, Track, TrackListSnapshot};
 use rand::{Rng, seq::SliceRandom};
 use smol::lock::Mutex;
 
@@ -214,7 +214,13 @@ impl TrackList {
       0
     };
 
-    let insert_index = position.get_absolute(track_index, inner.len());
+    let insert_index = match position {
+      InsertPosition::Absolute(position) => position.clamp(0, inner.len()),
+      InsertPosition::Next => track_index.saturating_add_signed(1),
+      InsertPosition::Start => 0,
+      InsertPosition::End => inner.len(),
+      InsertPosition::Replace => 0,
+    };
 
     let shuffle_indicies: Vec<usize> = inner.insert_tracks(insert_index, tracks).collect();
     let shuffled_track_indicies = &mut inner.shuffled_track_indicies;
@@ -249,7 +255,7 @@ impl TrackList {
     }
   }
 
-  pub async fn get_track_list(&self) -> hsm_ipc::client::TrackList {
+  pub async fn get_snapshot(&self) -> TrackListSnapshot {
     let inner = self.inner.lock().await;
 
     let track_list = inner
@@ -258,6 +264,9 @@ impl TrackList {
       .map(|arc_track| Track::clone(&arc_track))
       .collect();
 
-    hsm_ipc::client::TrackList::new(track_list, inner.shuffled_track_indicies.clone())
+    TrackListSnapshot {
+      track_list,
+      shuffle_indicies: inner.shuffled_track_indicies.clone(),
+    }
   }
 }

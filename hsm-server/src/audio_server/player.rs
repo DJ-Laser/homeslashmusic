@@ -10,7 +10,7 @@ use std::{
 use async_oneshot as oneshot;
 use controlled_source::{SeekError, SourceEvent, wrap_source};
 use decoder::TrackDecoder;
-use hsm_ipc::{InsertPosition, LoopMode, PlaybackState, SeekPosition, Track};
+use hsm_ipc::{InsertPosition, LoopMode, PlaybackState, SeekPosition, Track, TrackListSnapshot};
 use output::SourceQueueState;
 use rodio::{Source, mixer::Mixer};
 use smol::{
@@ -463,8 +463,8 @@ impl Player {
     Ok(())
   }
 
-  pub async fn get_track_list(&self) -> hsm_ipc::client::TrackList {
-    self.tracks.get_track_list().await
+  pub async fn get_track_list(&self) -> TrackListSnapshot {
+    self.tracks.get_snapshot().await
   }
 
   /// Inserts new tracks at a specified position in the track list

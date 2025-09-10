@@ -1,8 +1,8 @@
 use std::{path::PathBuf, time::Duration};
 
 use super::{
-  InsertPosition, LoopMode, PlaybackState, Request, SeekPosition, Track, client::TrackList,
-  private::SealedRequest, responses,
+  InsertPosition, LoopMode, PlaybackState, Request, SeekPosition, Track, TrackListSnapshot,
+  Version, private::SealedRequest,
 };
 
 macro_rules! requests {
@@ -77,7 +77,7 @@ paste::paste! {
 }
 
 requests! {
-  Version() -> responses::Version;
+  QueryVersion() -> Version;
 
   QueryPlaybackState() -> PlaybackState;
   Play() -> ();
@@ -105,7 +105,7 @@ requests! {
   QueryPosition() -> Duration;
   Seek(SeekPosition) -> ();
 
-  QueryTrackList() -> TrackList;
+  QueryTrackList() -> TrackListSnapshot;
   ClearTracks() -> ();
   LoadTracks(InsertPosition, Vec<PathBuf>) -> Vec<(PathBuf, String)>;
 }

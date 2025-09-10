@@ -745,9 +745,19 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "clap_complete",
+ "hsm-client",
  "hsm-ipc",
  "serde_json",
  "thiserror 2.0.12",
+]
+
+[[package]]
+name = "hsm-client"
+version = "0.1.0"
+dependencies = [
+ "hsm-ipc",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

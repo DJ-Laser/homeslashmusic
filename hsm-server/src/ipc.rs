@@ -6,7 +6,7 @@ use std::{
 
 use async_oneshot as oneshot;
 use hsm_ipc::{
-  Reply, Track, requests, responses,
+  Reply, Track, requests,
   server::{RequestHandler, handle_request},
 };
 use smol::{
@@ -146,8 +146,11 @@ impl StreamHandler {
 }
 
 impl RequestHandler for StreamHandler {
-  async fn handle_version(&self, _: requests::Version) -> Reply<requests::Version> {
-    Ok(responses::Version(hsm_ipc::version()))
+  async fn handle_query_version(
+    &self,
+    _request: requests::QueryVersion,
+  ) -> Reply<requests::QueryVersion> {
+    Ok(hsm_ipc::version())
   }
 
   async fn handle_query_playback_state(

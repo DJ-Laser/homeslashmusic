@@ -4,7 +4,7 @@ use std::{env, sync::OnceLock};
 pub use api::*;
 mod api;
 
-pub fn version() -> String {
+fn version_string() -> String {
   const MAJOR: &str = env!("CARGO_PKG_VERSION_MAJOR");
   const MINOR: &str = env!("CARGO_PKG_VERSION_MINOR");
   const PATCH: &str = env!("CARGO_PKG_VERSION_PATCH");
@@ -16,6 +16,10 @@ pub fn version() -> String {
   } else {
     format!("{MAJOR}.{MINOR:0>2}.{PATCH} ({commit})")
   }
+}
+
+pub fn version() -> Version {
+  Version(version_string())
 }
 
 fn read_socket_path() -> String {

@@ -9,6 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 hsm-ipc.workspace = true
+hsm-client.workspace = true
 
 clap.workspace = true
 thiserror.workspace = true

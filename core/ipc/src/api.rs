@@ -4,7 +4,6 @@ use serde::{Serialize, de::DeserializeOwned};
 
 pub mod client;
 pub mod requests;
-pub mod responses;
 pub mod server;
 mod types;
 

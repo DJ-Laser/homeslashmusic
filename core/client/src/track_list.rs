@@ -1,29 +1,7 @@
 use std::{iter::FusedIterator, ops::Index};
 
+use hsm_ipc::{Track, TrackListSnapshot, TrackListUpdate};
 use serde::{Deserialize, Serialize};
-
-use crate::Track;
-
-pub enum TrackListUpdate {
-  Insert {
-    index: usize,
-    tracks: Vec<Track>,
-    new_shuffle_indicies: Vec<usize>,
-  },
-
-  Remove {
-    removed_indicies: Vec<usize>,
-    new_shuffle_indicies: Vec<usize>,
-  },
-
-  Replace(TrackList),
-
-  Clear,
-
-  Shuffle {
-    new_shuffle_indicies: Vec<usize>,
-  },
-}
 
 /// A representation of the player's track list
 /// `track_list.len()` will always be equal to `shuffle_indicies.len()`
@@ -35,12 +13,20 @@ pub struct TrackList {
 }
 
 impl TrackList {
-  pub fn new(track_list: Vec<Track>, shuffle_indicies: Vec<usize>) -> Self {
-    debug_assert_eq!(track_list.len(), shuffle_indicies.len());
+  pub fn new() -> Self {
+    Self {
+      track_list: Vec::new(),
+      shuffle_indicies: Vec::new(),
+      needs_sync: false,
+    }
+  }
+
+  pub fn from_snapshot(snapshot: TrackListSnapshot) -> Self {
+    debug_assert_eq!(snapshot.track_list.len(), snapshot.shuffle_indicies.len());
 
     Self {
-      track_list,
-      shuffle_indicies,
+      track_list: snapshot.track_list,
+      shuffle_indicies: snapshot.shuffle_indicies,
       needs_sync: false,
     }
   }
@@ -54,19 +40,14 @@ impl TrackList {
     !self.needs_sync
   }
 
-  pub fn track_list(&self) -> &Vec<Track> {
-    &self.track_list
-  }
-
-  pub fn shuffle_indicies(&self) -> &Vec<usize> {
-    &self.shuffle_indicies
-  }
-
-  /// Replaces this `TrackList` in place with the contents of `other`
+  /// Replaces this `TrackList` in place with the contents of `snapshot`
   ///
   /// This will also reset `needs_sync`, allowing further updates to be applied normally again
-  pub fn sync(&mut self, other: TrackList) {
-    *self = other;
+  pub fn sync(&mut self, snapshot: TrackListSnapshot) {
+    debug_assert_eq!(snapshot.track_list.len(), snapshot.shuffle_indicies.len());
+
+    self.track_list = snapshot.track_list;
+    self.shuffle_indicies = snapshot.shuffle_indicies;
     self.needs_sync = false;
   }
 

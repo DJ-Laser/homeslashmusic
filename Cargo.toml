@@ -2,7 +2,9 @@
 resolver = "3"
 members = [
   "hsm-server",
-  "hsm-cli", "core/ipc",
+  "hsm-cli",
+  "core/ipc",
+  "core/client",
 ]
 
 [workspace.package]
@@ -11,6 +13,7 @@ edition = "2024"
 
 [workspace.dependencies]
 hsm-ipc = { path = "./core/ipc" }
+hsm-client = { path = "./core/client" }
 
 rodio = { version = "0.21.1", default-features = false, features = ["playback"] }
 symphonia = { version = "0.5.4", features = ["mp3", "isomp4", "aac"] }

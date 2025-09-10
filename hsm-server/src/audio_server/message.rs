@@ -1,7 +1,7 @@
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use async_oneshot as oneshot;
-use hsm_ipc::{InsertPosition, LoopMode, PlaybackState, SeekPosition, Track, client::TrackList};
+use hsm_ipc::{InsertPosition, LoopMode, PlaybackState, SeekPosition, Track, TrackListSnapshot};
 
 use super::track::LoadTrackError;
 
@@ -13,7 +13,7 @@ pub enum Query {
   Position(oneshot::Sender<Duration>),
   CurrentTrack(oneshot::Sender<Option<Arc<Track>>>),
   CurrentTrackIndex(oneshot::Sender<usize>),
-  IpcTrackList(oneshot::Sender<TrackList>),
+  IpcTrackList(oneshot::Sender<TrackListSnapshot>),
 }
 
 pub enum Message {
