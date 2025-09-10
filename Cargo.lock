@@ -772,6 +772,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "hsm-plugin"
+version = "0.1.0"
+dependencies = [
+ "hsm-ipc",
+]
+
+[[package]]
 name = "hsm-server"
 version = "0.1.0"
 dependencies = [
