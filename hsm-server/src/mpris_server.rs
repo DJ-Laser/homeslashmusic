@@ -1,5 +1,6 @@
 use conversions::{as_dbus_time, as_loop_status, as_playback_status};
 use futures_concurrency::future::Race;
+use hsm_ipc::Event;
 use mpris_impl::MprisImpl;
 use mpris_server::{
   Property, Server, Signal,
@@ -8,7 +9,7 @@ use mpris_server::{
 use smol::channel::{self, Receiver, Sender};
 use thiserror::Error;
 
-use crate::audio_server::{event::Event, message::Message};
+use crate::audio_server::message::Message;
 
 mod conversions;
 mod mpris_impl;

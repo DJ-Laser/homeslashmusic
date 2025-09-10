@@ -10,7 +10,9 @@ use std::{
 use async_oneshot as oneshot;
 use controlled_source::{SeekError, SourceEvent, wrap_source};
 use decoder::TrackDecoder;
-use hsm_ipc::{InsertPosition, LoopMode, PlaybackState, SeekPosition, Track, TrackListSnapshot};
+use hsm_ipc::{
+  Event, InsertPosition, LoopMode, PlaybackState, SeekPosition, Track, TrackListSnapshot,
+};
 use output::SourceQueueState;
 use rodio::{Source, mixer::Mixer};
 use smol::{
@@ -22,10 +24,7 @@ use atomic_control_status::{AtomicLoopMode, AtomicPlaybackState};
 use thiserror::Error;
 use track_list::TrackList;
 
-use super::{
-  event::Event,
-  track::{LoadTrackError, LoadedTrack},
-};
+use super::track::{LoadTrackError, LoadedTrack};
 pub use output::PlayerAudioOutput;
 
 mod atomic_control_status;

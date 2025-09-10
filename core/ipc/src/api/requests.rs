@@ -28,6 +28,8 @@ paste::paste! {
   pub(crate) mod private {
     use crate::{requests, Reply};
 
+    /// Prefer using `Request.into()` or generics when writing requests
+    /// This type is only needed to destinguish between requests when sending them to the server
     #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
     pub enum QualifiedRequest {
       $(
@@ -60,14 +62,18 @@ paste::paste! {
     }
   }
 
+  use private::QualifiedRequest;
+
   $(
     requests!(@def $name $fields);
 
-    impl SealedRequest for $name {
-      fn qualified_request(self) -> private::QualifiedRequest {
-        private::QualifiedRequest::$name(self)
+    impl Into<QualifiedRequest> for $name {
+      fn into(self) -> QualifiedRequest {
+        QualifiedRequest::$name(self)
       }
     }
+
+    impl SealedRequest for $name {}
     impl Request for $name {
       type Response = $response;
     }

@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use std::{fmt::Debug, time::Duration};
 
 use serde::{Serialize, de::DeserializeOwned};
 
@@ -7,17 +7,18 @@ pub mod requests;
 pub mod server;
 mod types;
 
+pub use requests::private::QualifiedRequest;
 pub use types::*;
 
 pub(crate) mod private {
-
   use std::fmt::Debug;
 
   use serde::{Serialize, de::DeserializeOwned};
 
-  use super::requests;
-  pub trait SealedRequest: Debug + Clone + Serialize + DeserializeOwned {
-    fn qualified_request(self) -> requests::private::QualifiedRequest;
+  use super::QualifiedRequest;
+  pub trait SealedRequest:
+    Debug + Clone + Serialize + DeserializeOwned + Into<QualifiedRequest>
+  {
   }
 }
 
@@ -38,3 +39,13 @@ pub type Reply<R>
 where
   R: Request,
 = Result<<R as Request>::Response, String>;
+
+/// An event than can be sent from the serverasynchronously at any time.
+#[derive(Debug, Clone)]
+pub enum Event {
+  PlaybackStateChanged(PlaybackState),
+  LoopModeChanged(LoopMode),
+  ShuffleChanged(bool),
+  VolumeChanged(f32),
+  Seeked(Duration),
+}

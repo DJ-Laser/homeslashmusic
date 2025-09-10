@@ -1,7 +1,7 @@
-use super::{Reply, Request};
+use super::{QualifiedRequest, Reply, Request};
 
 pub fn serialize_request(request: impl Request) -> String {
-  let mut request_data = serde_json::to_string(&request.qualified_request())
+  let mut request_data = serde_json::to_string::<QualifiedRequest>(&request.into())
     .expect("Requests should not fail to serialize");
   request_data.push('\n');
   request_data

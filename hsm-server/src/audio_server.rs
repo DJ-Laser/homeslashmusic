@@ -1,5 +1,5 @@
-use event::Event;
 use futures_concurrency::future::Race;
+use hsm_ipc::Event;
 use message::{Message, Query};
 use player::Player;
 use rodio::OutputStream;
@@ -8,7 +8,6 @@ use smol::{
   lock::Mutex,
 };
 
-pub mod event;
 pub mod message;
 mod player;
 mod track;
