@@ -779,6 +779,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "hsm-plugin-mpris"
+version = "0.1.0"
+dependencies = [
+ "hsm-ipc",
+ "hsm-plugin",
+ "mpris-server",
+ "smol",
+ "thiserror 2.0.12",
+ "urlencoding",
+]
+
+[[package]]
 name = "hsm-server"
 version = "0.1.0"
 dependencies = [
@@ -787,7 +799,6 @@ dependencies = [
  "dashmap",
  "futures-concurrency",
  "hsm-ipc",
- "mpris-server",
  "rand",
  "rodio",
  "smol",

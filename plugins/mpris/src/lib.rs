@@ -1,23 +1,16 @@
 use conversions::{as_dbus_time, as_loop_status, as_playback_status};
-use futures_concurrency::future::Race;
 use hsm_ipc::Event;
+use hsm_plugin::{Plugin, RequestSender};
 use mpris_impl::MprisImpl;
 use mpris_server::{
   Property, Server, Signal,
   zbus::{self},
 };
-use smol::channel::{self, Receiver, Sender};
+use smol::channel::{self, Receiver};
 use thiserror::Error;
-
-use crate::audio_server::message::Message;
 
 mod conversions;
 mod mpris_impl;
-
-enum EventOrQuit {
-  Event(Event),
-  Quit,
-}
 
 #[derive(Debug, Error)]
 pub enum MprisServerError {
@@ -28,31 +21,31 @@ pub enum MprisServerError {
   EventChannelClosed,
 }
 
-pub struct MprisServer {
-  server: Server<MprisImpl>,
-  event_rx: Receiver<Event>,
+pub struct MprisServer<Tx> {
+  server: Server<MprisImpl<Tx>>,
+
   quit_rx: Receiver<()>,
 }
 
-impl MprisServer {
+impl<Tx> MprisServer<Tx> {
   pub const BUS_NAME: &str = "dev.djlaser.HomeSlashMusic";
+}
 
-  pub async fn init(
-    message_tx: Sender<Message>,
-    event_rx: Receiver<Event>,
-  ) -> Result<Self, MprisServerError> {
+impl<Tx: RequestSender + Send + Sync + 'static> Plugin<Tx> for MprisServer<Tx> {
+  type Error = MprisServerError;
+
+  async fn init(request_tx: Tx) -> Result<Self, Self::Error>
+  where
+    Self: Sized,
+  {
     let (quit_tx, quit_rx) = channel::bounded(1);
 
-    let server = Server::new(Self::BUS_NAME, MprisImpl::new(message_tx, quit_tx)).await?;
+    let server = Server::new(Self::BUS_NAME, MprisImpl::new(request_tx, quit_tx)).await?;
 
-    Ok(Self {
-      server,
-      event_rx,
-      quit_rx,
-    })
+    Ok(Self { server, quit_rx })
   }
 
-  async fn handle_event(&self, event: Event) -> Result<(), MprisServerError> {
+  async fn on_event(&self, event: Event) -> Result<(), Self::Error> {
     match event {
       Event::PlaybackStateChanged(playback_state) => {
         self
@@ -91,25 +84,10 @@ impl MprisServer {
     Ok(())
   }
 
-  async fn await_next_event(&self) -> Result<EventOrQuit, MprisServerError> {
-    (
-      async { self.event_rx.recv().await.map(EventOrQuit::Event) },
-      async { self.quit_rx.recv().await.map(|_| EventOrQuit::Quit) },
-    )
-      .race()
-      .await
-      .map_err(|_| MprisServerError::EventChannelClosed)
-  }
+  async fn run(&self) -> Result<(), Self::Error> {
+    let _ = self.quit_rx.recv().await;
+    println!("Recieved MPRIS Quit command");
 
-  pub async fn run(&self) -> Result<(), MprisServerError> {
-    loop {
-      match self.await_next_event().await? {
-        EventOrQuit::Event(event) => self.handle_event(event).await?,
-        EventOrQuit::Quit => {
-          println!("Recieved MPRIS Quit command");
-          break Ok(());
-        }
-      }
-    }
+    Ok(())
   }
 }

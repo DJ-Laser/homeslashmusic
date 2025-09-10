@@ -16,6 +16,7 @@ pub(crate) mod private {
   use serde::{Serialize, de::DeserializeOwned};
 
   use super::QualifiedRequest;
+
   pub trait SealedRequest:
     Debug + Clone + Serialize + DeserializeOwned + Into<QualifiedRequest>
   {

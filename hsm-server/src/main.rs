@@ -3,13 +3,11 @@ use std::{error::Error, sync::Arc};
 use audio_server::AudioServer;
 use futures_concurrency::future::Race;
 use ipc::IpcServer;
-use mpris_server::MprisServer;
 use signals::SignalHandler;
 use smol::Executor;
 
 mod audio_server;
 mod ipc;
-mod mpris_server;
 mod signals;
 
 async fn run_servers(ex: &Arc<Executor<'static>>) -> Result<(), Box<dyn Error>> {
@@ -17,16 +15,16 @@ async fn run_servers(ex: &Arc<Executor<'static>>) -> Result<(), Box<dyn Error>> 
 
   let (audio_server, message_tx) = AudioServer::init();
   let ipc_server = IpcServer::new(message_tx.clone(), ex.clone())?;
-  let mpris_server = MprisServer::init(
+  /*let mpris_server = MprisServer::init(
     message_tx.clone(),
     audio_server.register_event_listener().await,
   )
-  .await?;
+  .await?;*/
 
   let server_futures = (
     async move { ipc_server.run().await.map_err(Into::<Box<dyn Error>>::into) },
     async { audio_server.run().await.map_err(Into::into) },
-    async { mpris_server.run().await.map_err(Into::into) },
+    //async { mpris_server.run().await.map_err(Into::into) },
     async {
       signal_handler.wait_for_quit().await;
       Ok(())

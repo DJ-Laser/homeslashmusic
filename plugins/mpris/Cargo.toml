@@ -1,0 +1,13 @@
+[package]
+name = "hsm-plugin-mpris"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+hsm-ipc.workspace = true
+hsm-plugin.workspace = true
+
+smol.workspace = true
+thiserror.workspace = true
+urlencoding.workspace = true
+mpris-server = "0.9.0"

@@ -6,6 +6,7 @@ members = [
   "core/ipc",
   "core/client",
   "core/plugin",
+  "plugins/mpris"
 ]
 
 [workspace.package]
@@ -15,7 +16,9 @@ edition = "2024"
 [workspace.dependencies]
 hsm-ipc = { path = "./core/ipc" }
 hsm-client = { path = "./core/client" }
+
 hsm-plugin = { path = "./core/plugin" }
+hsm-plugin-mpris = { path = "./plugins/mpris" }
 
 rodio = { version = "0.21.1", default-features = false, features = ["playback"] }
 symphonia = { version = "0.5.4", features = ["mp3", "isomp4", "aac"] }

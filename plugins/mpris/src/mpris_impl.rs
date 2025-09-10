@@ -1,27 +1,25 @@
-use async_oneshot as oneshot;
-use hsm_ipc::{InsertPosition, SeekPosition};
+use hsm_ipc::{InsertPosition, Request, SeekPosition, requests};
+use hsm_plugin::RequestSender;
 use mpris_server::{
   PlayerInterface, RootInterface,
   zbus::{self, fdo},
 };
 use smol::channel::{self, Sender};
 
-use crate::audio_server::message::{Message, Query};
-
 use super::conversions::{
   as_dbus_time, as_loop_status, as_playback_status, decode_file_url, from_dbus_time,
   from_loop_status, generate_metadata,
 };
 
-pub struct MprisImpl {
-  message_tx: Sender<Message>,
+pub struct MprisImpl<Tx> {
+  request_tx: Tx,
   quit_tx: Sender<()>,
 }
 
-impl MprisImpl {
-  pub fn new(message_tx: channel::Sender<Message>, quit_tx: channel::Sender<()>) -> Self {
+impl<Tx> MprisImpl<Tx> {
+  pub fn new(request_tx: Tx, quit_tx: channel::Sender<()>) -> Self {
     Self {
-      message_tx,
+      request_tx,
       quit_tx,
     }
   }
@@ -37,23 +35,22 @@ impl MprisImpl {
   fn channel_closed_error<T>(_t: T) -> fdo::Error {
     fdo::Error::Failed("Channel was unexpectedly closed".into())
   }
+}
 
-  async fn try_send(&self, message: Message) -> fdo::Result<()> {
+impl<Tx: RequestSender> MprisImpl<Tx> {
+  async fn try_send<R: Request>(&self, request: R) -> fdo::Result<R::Response>
+  where
+    R::Response: Send,
+  {
     self
-      .message_tx
-      .send(message)
+      .request_tx
+      .send_request(request)
       .await
       .map_err(Self::channel_closed_error)
   }
-
-  async fn try_query<T>(&self, query: impl Fn(oneshot::Sender<T>) -> Query) -> fdo::Result<T> {
-    let (query_tx, query_rx) = oneshot::oneshot();
-    self.try_send(Message::Query(query(query_tx))).await?;
-    Ok(query_rx.await.map_err(Self::channel_closed_error)?)
-  }
 }
 
-impl RootInterface for MprisImpl {
+impl<Tx: RequestSender + Send + Sync> RootInterface for MprisImpl<Tx> {
   async fn raise(&self) -> fdo::Result<()> {
     Self::unsupported("Raise is not supported")
   }
@@ -114,29 +111,29 @@ impl RootInterface for MprisImpl {
   }
 }
 
-impl PlayerInterface for MprisImpl {
+impl<Tx: RequestSender + Send + Sync> PlayerInterface for MprisImpl<Tx> {
   async fn next(&self) -> fdo::Result<()> {
-    self.try_send(Message::NextTrack).await
+    self.try_send(requests::NextTrack).await
   }
 
   async fn previous(&self) -> fdo::Result<()> {
-    self.try_send(Message::PreviousTrack { soft: true }).await
+    self.try_send(requests::PreviousTrack { soft: true }).await
   }
 
   async fn pause(&self) -> fdo::Result<()> {
-    self.try_send(Message::Pause).await
+    self.try_send(requests::Pause).await
   }
 
   async fn play_pause(&self) -> fdo::Result<()> {
-    self.try_send(Message::Toggle).await
+    self.try_send(requests::TogglePlayback).await
   }
 
   async fn stop(&self) -> fdo::Result<()> {
-    self.try_send(Message::Stop).await
+    self.try_send(requests::StopPlayback).await
   }
 
   async fn play(&self) -> fdo::Result<()> {
-    self.try_send(Message::Play).await
+    self.try_send(requests::Play).await
   }
 
   async fn seek(&self, offset: mpris_server::Time) -> fdo::Result<()> {
@@ -150,7 +147,7 @@ impl PlayerInterface for MprisImpl {
       SeekPosition::Backward(from_dbus_time(offset))
     };
 
-    self.try_send(Message::Seek(seek_offset)).await
+    self.try_send(requests::Seek(seek_offset)).await
   }
 
   async fn set_position(
@@ -163,21 +160,14 @@ impl PlayerInterface for MprisImpl {
     }
 
     let seek_position = SeekPosition::To(from_dbus_time(position));
-    self.try_send(Message::Seek(seek_position)).await
+    self.try_send(requests::Seek(seek_position)).await
   }
 
   async fn open_uri(&self, uri: String) -> fdo::Result<()> {
     if let Some(file_path) = decode_file_url(uri) {
-      let (tx, rx) = oneshot::oneshot();
-      self
-        .try_send(Message::InsertTracks {
-          paths: vec![file_path],
-          position: InsertPosition::End,
-          error_tx: tx,
-        })
+      let errors = self
+        .try_send(requests::LoadTracks(InsertPosition::End, vec![file_path]))
         .await?;
-
-      let errors = rx.await.map_err(Self::channel_closed_error)?;
 
       match errors.first() {
         Some((_path, error)) => Err(fdo::Error::Failed(error.to_string())),
@@ -189,18 +179,18 @@ impl PlayerInterface for MprisImpl {
   }
 
   async fn playback_status(&self) -> fdo::Result<mpris_server::PlaybackStatus> {
-    let playback_state = self.try_query(Query::PlaybackState).await?;
+    let playback_state = self.try_send(requests::QueryPlaybackState).await?;
     Ok(as_playback_status(playback_state))
   }
 
   async fn loop_status(&self) -> fdo::Result<mpris_server::LoopStatus> {
-    let loop_mode = self.try_query(Query::LoopMode).await?;
+    let loop_mode = self.try_send(requests::QueryLoopMode).await?;
     Ok(as_loop_status(loop_mode))
   }
 
   async fn set_loop_status(&self, loop_status: mpris_server::LoopStatus) -> zbus::Result<()> {
     self
-      .try_send(Message::SetLoopMode(from_loop_status(loop_status)))
+      .try_send(requests::SetLoopMode(from_loop_status(loop_status)))
       .await
       .map_err(zbus::Error::from)
   }
@@ -220,18 +210,18 @@ impl PlayerInterface for MprisImpl {
   }
 
   async fn shuffle(&self) -> fdo::Result<bool> {
-    self.try_query(Query::Shuffle).await
+    self.try_send(requests::QueryShuffle).await
   }
 
   async fn set_shuffle(&self, shuffle: bool) -> zbus::Result<()> {
     self
-      .try_send(Message::SetShuffle(shuffle))
+      .try_send(requests::SetShuffle(shuffle))
       .await
       .map_err(zbus::Error::from)
   }
 
   async fn metadata(&self) -> fdo::Result<mpris_server::Metadata> {
-    let metadata = match self.try_query(Query::CurrentTrack).await? {
+    let metadata = match self.try_send(requests::QueryCurrentTrack).await? {
       Some(track) => generate_metadata(&track),
       None => mpris_server::Metadata::builder()
         .trackid(mpris_server::TrackId::NO_TRACK)
@@ -243,20 +233,23 @@ impl PlayerInterface for MprisImpl {
 
   async fn volume(&self) -> fdo::Result<mpris_server::Volume> {
     self
-      .try_query(Query::Volume)
+      .try_send(requests::QueryVolume)
       .await
       .map(|volume| volume.into())
   }
 
   async fn set_volume(&self, volume: mpris_server::Volume) -> zbus::Result<()> {
     self
-      .try_send(Message::SetVolume(volume as f32))
+      .try_send(requests::SetVolume(volume as f32))
       .await
       .map_err(zbus::Error::from)
   }
 
   async fn position(&self) -> fdo::Result<mpris_server::Time> {
-    self.try_query(Query::Position).await.map(as_dbus_time)
+    self
+      .try_send(requests::QueryPosition)
+      .await
+      .map(as_dbus_time)
   }
 
   async fn minimum_rate(&self) -> fdo::Result<mpris_server::PlaybackRate> {
