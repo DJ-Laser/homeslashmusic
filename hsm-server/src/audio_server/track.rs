@@ -4,9 +4,10 @@ use std::{
 };
 
 pub use cache::TrackCache;
+use hsm_ipc::{Track, TrackMetadata};
 pub use loading::{load_file, probe_track_sync};
 use smol::fs;
-use symphonia::core::errors::Error as SymphoniaError;
+use symphonia::core::{audio::SignalSpec, errors::Error as SymphoniaError};
 use thiserror::Error;
 
 mod cache;
@@ -31,6 +32,33 @@ pub enum LoadTrackError {
 
   #[error("{0}")]
   DecodingFailed(#[source] SymphoniaError),
+}
+
+/// A `Track` that has been loaded into the cache
+#[derive(Debug)]
+pub struct LoadedTrack {
+  pub inner: Track,
+  pub spec: SignalSpec,
+}
+
+impl LoadedTrack {
+  pub fn file_path(&self) -> &Path {
+    &self.inner.file_path
+  }
+
+  pub fn metadata(&self) -> &TrackMetadata {
+    &self.inner.metadata
+  }
+
+  pub fn clone_track(&self) -> Track {
+    self.inner.clone()
+  }
+}
+
+impl Into<Track> for LoadedTrack {
+  fn into(self) -> Track {
+    self.inner
+  }
 }
 
 pub async fn get_cannonical_track_path(path: &Path) -> Result<PathBuf, LoadTrackError> {

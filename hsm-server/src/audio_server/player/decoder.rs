@@ -1,16 +1,15 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
-use hsm_ipc::Track;
 use symphonia::core::{
-  audio::{Channels, SampleBuffer, SignalSpec},
-  codecs::{Decoder, DecoderOptions},
+  audio::{SampleBuffer, SignalSpec},
+  codecs::{CODEC_TYPE_NULL, Decoder, DecoderOptions},
   errors::{Error as SymphoniaError, SeekErrorKind as SymphoniaSeekError},
   formats::{FormatReader, SeekMode, SeekTo, SeekedTo},
 };
 
 use rodio::{ChannelCount, Sample, SampleRate, Source, source::SeekError as RodioSeekError};
 
-use crate::audio_server::track::{self, LoadTrackError};
+use crate::audio_server::track::{self, LoadTrackError, LoadedTrack};
 
 /// A `Source` that decodes `Track`s using symphonia
 pub(crate) struct TrackDecoder {
@@ -23,11 +22,11 @@ pub(crate) struct TrackDecoder {
 }
 
 impl TrackDecoder {
-  pub async fn new(track: Track) -> Result<Self, LoadTrackError> {
-    smol::unblock(|| Self::new_sync(track)).await
+  pub async fn new(track: Arc<LoadedTrack>) -> Result<Self, LoadTrackError> {
+    smol::unblock(move || Self::new_sync(track)).await
   }
 
-  fn new_sync(track: Track) -> Result<Self, LoadTrackError> {
+  fn new_sync(track: Arc<LoadedTrack>) -> Result<Self, LoadTrackError> {
     println!("Creating decoder for track {:?}", track.file_path());
 
     let probed = track::probe_track_sync(track.file_path())?;
@@ -35,27 +34,21 @@ impl TrackDecoder {
       .format
       .tracks()
       .iter()
-      .find(|t| t.id == track.audio_spec().track_id)
+      .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
       .ok_or(LoadTrackError::CodecNotSupported)?;
 
     let decoder = symphonia::default::get_codecs()
       .make(&audio_track.codec_params, &DecoderOptions::default())
       .map_err(|_| LoadTrackError::CodecNotSupported)?;
 
-    // `Track` decodes the first packet to ensure a valid spec
-    let spec = SignalSpec::new(
-      track.audio_spec().sample_rate,
-      Channels::from_bits_truncate(track.audio_spec().channel_bitmask),
-    );
-
-    let buffer = SampleBuffer::new(0, spec);
+    let buffer = SampleBuffer::new(0, track.spec);
     Ok(TrackDecoder {
       decoder,
       current_span_offset: 0,
       format: probed.format,
-      total_duration: track.audio_spec().total_duration,
+      total_duration: track.inner.total_duration,
       buffer,
-      spec,
+      spec: track.spec,
     })
   }
 

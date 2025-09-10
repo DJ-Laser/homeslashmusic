@@ -43,7 +43,7 @@ pub fn from_dbus_time(time: mpris_server::Time) -> Duration {
 pub fn generate_metadata(track: &Track) -> mpris_server::Metadata {
   let track_id = ObjectPath::from_static_str_unchecked("/dev/djlaser/HomeSlashMusic/DefaultTrack");
 
-  let metadata = track.metadata().clone();
+  let metadata = track.metadata.clone();
   let mut builder = mpris_server::Metadata::builder()
     .trackid(track_id)
     .artist(metadata.artists)
@@ -66,11 +66,11 @@ pub fn generate_metadata(track: &Track) -> mpris_server::Metadata {
     builder = builder.content_created(date);
   }
 
-  if let Some(duration) = track.audio_spec().total_duration {
+  if let Some(duration) = track.total_duration {
     builder = builder.length(mpris_server::Time::from_micros(duration.as_micros() as i64));
   }
 
-  let url = encode_file_url(track.file_path());
+  let url = encode_file_url(&track.file_path);
   builder = builder.url(url);
 
   builder.build()

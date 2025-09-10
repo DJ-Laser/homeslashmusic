@@ -4,16 +4,15 @@ use std::{
 };
 
 use dashmap::DashMap;
-use hsm_ipc::Track;
 use smol::{fs, stream::StreamExt};
 
-use super::LoadTrackError;
+use super::{LoadTrackError, LoadedTrack};
 
-type Tracks = Vec<Arc<Track>>;
+type Tracks = Vec<Arc<LoadedTrack>>;
 type Errors = Vec<(PathBuf, LoadTrackError)>;
 
 pub struct TrackCache {
-  loaded_tracks: DashMap<PathBuf, Weak<Track>>,
+  loaded_tracks: DashMap<PathBuf, Weak<LoadedTrack>>,
 }
 
 impl TrackCache {
@@ -27,7 +26,7 @@ impl TrackCache {
   async fn get_or_load_track(
     &self,
     path: PathBuf,
-  ) -> Result<Arc<Track>, (PathBuf, LoadTrackError)> {
+  ) -> Result<Arc<LoadedTrack>, (PathBuf, LoadTrackError)> {
     let cannnonical_path = super::get_cannonical_track_path(&path)
       .await
       .map_err(|error| (path.clone(), error))?;
@@ -44,7 +43,7 @@ impl TrackCache {
       );
       self
         .loaded_tracks
-        .insert(track.file_path().clone(), Arc::downgrade(&track));
+        .insert(track.file_path().to_path_buf(), Arc::downgrade(&track));
 
       return Ok(track);
     };
@@ -56,7 +55,7 @@ impl TrackCache {
   /// Tracks without these will be sorted to the end
   async fn sort_tracks(&self, tracks: &mut Tracks) {
     // Sort by title if available, othewise by file name
-    fn get_track_title(track: &Arc<Track>) -> String {
+    fn get_track_title(track: &Arc<LoadedTrack>) -> String {
       track
         .metadata()
         .title

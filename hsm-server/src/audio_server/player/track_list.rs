@@ -10,12 +10,38 @@ use hsm_ipc::{InsertPosition, Track, TrackListSnapshot};
 use rand::{Rng, seq::SliceRandom};
 use smol::lock::Mutex;
 
+use crate::audio_server::track::LoadedTrack;
+
 use super::PlayerError;
+
+/// A `LoadedTrack` with a track_id to uniquely identify it
+#[derive(Debug, Clone)]
+pub struct TrackInstance {
+  track: Arc<LoadedTrack>,
+  track_id: usize,
+}
+
+impl TrackInstance {
+  pub fn loaded_track(&self) -> &LoadedTrack {
+    &self.track
+  }
+
+  pub fn track_id(&self) -> usize {
+    self.track_id
+  }
+}
+
+impl Into<Arc<LoadedTrack>> for TrackInstance {
+  fn into(self) -> Arc<LoadedTrack> {
+    self.track
+  }
+}
 
 /// `track_list` and `shuffle_order` must always have the same `len()``
 struct TrackListInner {
-  track_list: Vec<Arc<Track>>,
+  track_list: Vec<TrackInstance>,
   shuffled_track_indicies: Vec<usize>,
+  latest_track_id: usize,
 }
 
 impl TrackListInner {
@@ -23,6 +49,7 @@ impl TrackListInner {
     Self {
       track_list: Vec::new(),
       shuffled_track_indicies: Vec::new(),
+      latest_track_id: 0,
     }
   }
 
@@ -45,11 +72,21 @@ impl TrackListInner {
   pub fn insert_tracks(
     &mut self,
     index: usize,
-    tracks: &[Arc<Track>],
+    tracks: &[Arc<LoadedTrack>],
   ) -> impl Iterator<Item = usize> {
     debug_assert_eq!(self.track_list.len(), self.track_list.len());
 
-    self.track_list.splice(index..index, tracks.iter().cloned());
+    let track_instances = tracks.iter().map(|track| {
+      let track_instance = TrackInstance {
+        track: track.clone(),
+        track_id: self.latest_track_id,
+      };
+
+      self.latest_track_id += 1;
+      track_instance
+    });
+
+    self.track_list.splice(index..index, track_instances);
 
     // Update shuffle indicies to point to the updated track positions
     for shuffle_index in self.shuffled_track_indicies.iter_mut() {
@@ -91,7 +128,7 @@ impl TrackListInner {
 }
 
 impl Index<usize> for TrackListInner {
-  type Output = Arc<Track>;
+  type Output = TrackInstance;
 
   fn index(&self, index: usize) -> &Self::Output {
     debug_assert_eq!(self.track_list.len(), self.track_list.len());
@@ -122,7 +159,7 @@ impl TrackList {
     self.track_list_len.load(Ordering::Acquire)
   }
 
-  pub async fn get_track(&self, index: usize) -> Option<Arc<Track>> {
+  pub async fn get_track(&self, index: usize) -> Option<Track> {
     let num_tracks = self.track_list_len.load(Ordering::Acquire);
 
     if index >= num_tracks {
@@ -130,14 +167,14 @@ impl TrackList {
     }
 
     let inner = self.inner.lock().await;
-    Some(inner[index].clone())
+    Some(inner[index].loaded_track().clone_track())
   }
 
   /// Returns `None` if the track list length is zero
   pub async fn get_tracks_to_queue(
     &self,
     index: usize,
-  ) -> Option<(Arc<Track>, Option<Arc<Track>>)> {
+  ) -> Option<(Arc<LoadedTrack>, Option<Arc<LoadedTrack>>)> {
     let num_tracks = self.track_list_len.load(Ordering::Acquire);
 
     if index >= num_tracks {
@@ -146,11 +183,11 @@ impl TrackList {
 
     let inner = self.inner.lock().await;
 
-    let current_track = inner[index].clone();
+    let current_track = inner[index].track.clone();
 
     let is_last_track = index == num_tracks - 1;
     let next_track = if !is_last_track {
-      Some(inner[index + 1].clone())
+      Some(inner[index + 1].track.clone())
     } else {
       None
     };
@@ -197,7 +234,7 @@ impl TrackList {
     &self,
     current_index: usize,
     position: InsertPosition,
-    tracks: &[Arc<Track>],
+    tracks: &[Arc<LoadedTrack>],
   ) -> Result<usize, PlayerError> {
     let mut inner = self.inner.lock().await;
 
@@ -261,7 +298,7 @@ impl TrackList {
     let track_list = inner
       .track_list
       .iter()
-      .map(|arc_track| Track::clone(&arc_track))
+      .map(|track_instance| track_instance.loaded_track().clone_track())
       .collect();
 
     TrackListSnapshot {

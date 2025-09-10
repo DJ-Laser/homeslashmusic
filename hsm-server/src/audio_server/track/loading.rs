@@ -3,7 +3,7 @@ use std::{
   path::{Path, PathBuf},
 };
 
-use hsm_ipc::{AudioSpec, Track, TrackMetadata};
+use hsm_ipc::{Track, TrackMetadata};
 use symphonia::core::{
   audio::SignalSpec,
   codecs::{CODEC_TYPE_NULL, Decoder, DecoderOptions},
@@ -14,7 +14,7 @@ use symphonia::core::{
   probe::{Hint, ProbeResult},
 };
 
-use super::LoadTrackError;
+use super::{LoadTrackError, LoadedTrack};
 
 /// Use the default symphonia probe and the path's extension as a `Hint`
 ///
@@ -139,10 +139,10 @@ fn update_metadata(metadata: &mut TrackMetadata, metadata_log: &mut Metadata) {
 
 /// Load a `Track` from a specified file path
 /// This will attempt to decode the first audio packet to ensure a correct `AudioSpec`
-pub async fn load_file(path: PathBuf) -> Result<Track, LoadTrackError> {
+pub async fn load_file(path: PathBuf) -> Result<LoadedTrack, LoadTrackError> {
   let outer_path = path.clone();
 
-  let (audio_spec, metadata) = smol::unblock(move || {
+  let (total_duration, spec, metadata) = smol::unblock(move || {
     let mut probed = probe_track_sync(&path)?;
 
     let audio_track = probed
@@ -155,7 +155,6 @@ pub async fn load_file(path: PathBuf) -> Result<Track, LoadTrackError> {
 
     let codec_params = &audio_track.codec_params;
 
-    let bit_depth = codec_params.bits_per_sample;
     let total_duration = codec_params
       .time_base
       .zip(codec_params.n_frames)
@@ -165,16 +164,7 @@ pub async fn load_file(path: PathBuf) -> Result<Track, LoadTrackError> {
       .make(&audio_track.codec_params, &DecoderOptions::default())
       .map_err(|_| LoadTrackError::CodecNotSupported)?;
 
-    let signal_spec = decode_first_frame_sync(&mut probed.format, &mut decoder, track_id)?;
-
-    let audio_spec = AudioSpec {
-      track_id,
-      bit_depth,
-      channel_bitmask: signal_spec.channels.bits(),
-      channel_count: signal_spec.channels.count() as u16,
-      sample_rate: signal_spec.rate,
-      total_duration,
-    };
+    let spec = decode_first_frame_sync(&mut probed.format, &mut decoder, track_id)?;
 
     let mut track_metadata = Default::default();
 
@@ -184,9 +174,16 @@ pub async fn load_file(path: PathBuf) -> Result<Track, LoadTrackError> {
 
     update_metadata(&mut track_metadata, &mut probed.format.metadata());
 
-    Ok((audio_spec, track_metadata))
+    Ok((total_duration, spec, track_metadata))
   })
   .await?;
 
-  Ok(Track::new(outer_path.clone(), audio_spec, metadata))
+  Ok(LoadedTrack {
+    inner: Track {
+      file_path: outer_path,
+      total_duration,
+      metadata,
+    },
+    spec,
+  })
 }

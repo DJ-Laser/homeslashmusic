@@ -22,7 +22,10 @@ use atomic_control_status::{AtomicLoopMode, AtomicPlaybackState};
 use thiserror::Error;
 use track_list::TrackList;
 
-use super::{event::Event, track::LoadTrackError};
+use super::{
+  event::Event,
+  track::{LoadTrackError, LoadedTrack},
+};
 pub use output::PlayerAudioOutput;
 
 mod atomic_control_status;
@@ -126,9 +129,9 @@ impl Player {
 
   async fn load_track_source(
     &self,
-    track: &Arc<Track>,
+    track: &Arc<LoadedTrack>,
   ) -> Result<Box<dyn Source + Send + 'static>, LoadTrackError> {
-    let decoder = TrackDecoder::new(track.as_ref().clone()).await?;
+    let decoder = TrackDecoder::new(track.clone()).await?;
 
     Ok(Box::new(wrap_source(
       decoder,
@@ -150,7 +153,7 @@ impl Player {
   /// If it is not ensured that the queue is empty beforehand it can cause an infinite loop and lockup
   async fn queue_track(
     &self,
-    track: &Arc<Track>,
+    track: &Arc<LoadedTrack>,
     wait_for_empty_queue: bool,
   ) -> Result<(), LoadTrackError> {
     let source = self.load_track_source(track).await?;
@@ -285,7 +288,7 @@ impl Player {
     Ok(())
   }
 
-  pub async fn current_track(&self) -> Option<Arc<Track>> {
+  pub async fn current_track(&self) -> Option<Track> {
     self
       .tracks
       .get_track(self.current_track_index.load(Ordering::Acquire))
@@ -471,7 +474,7 @@ impl Player {
   pub async fn insert_tracks(
     &self,
     position: InsertPosition,
-    tracks: &[Arc<Track>],
+    tracks: &[Arc<LoadedTrack>],
   ) -> Result<(), PlayerError> {
     let current_index = self.current_track_index.load(Ordering::Acquire);
 

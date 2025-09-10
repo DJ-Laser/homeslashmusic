@@ -40,11 +40,11 @@ fn print_track_list(snapshot: TrackListSnapshot) {
 
   for track in track_list.iter() {
     let title = track
-      .metadata()
+      .metadata
       .title
       .as_ref()
       .map(|title| title.clone())
-      .unwrap_or_else(|| track.file_path().to_string_lossy().into_owned());
+      .unwrap_or_else(|| track.file_path.to_string_lossy().into_owned());
 
     println!("| {title}")
   }

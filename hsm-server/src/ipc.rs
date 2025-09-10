@@ -6,7 +6,7 @@ use std::{
 
 use async_oneshot as oneshot;
 use hsm_ipc::{
-  Reply, Track, requests,
+  Reply, requests,
   server::{RequestHandler, handle_request},
 };
 use smol::{
@@ -188,7 +188,7 @@ impl RequestHandler for StreamHandler {
   ) -> Reply<requests::QueryCurrentTrack> {
     let track = self.try_query(Query::CurrentTrack).await?;
 
-    Ok(track.map(|arc_track| Track::clone(&arc_track)))
+    Ok(track)
   }
 
   async fn handle_query_current_track_index(
