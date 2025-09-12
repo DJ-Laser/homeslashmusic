@@ -26,7 +26,8 @@ macro_rules! requests {
   ) => {
 paste::paste! {
   pub(crate) mod private {
-    use crate::{requests, Reply};
+    use crate::{requests};
+    use super::*;
 
     /// Prefer using `Request.into()` or generics when writing requests
     /// This type is only needed to destinguish between requests when sending them to the server
@@ -37,41 +38,37 @@ paste::paste! {
       )*
     }
 
-    pub trait RequestHandler {
-      $(
-        fn [<handle_ $name:snake>](&self, request: requests::$name) -> impl Future<Output = Reply<requests::$name>>;
-      )*
-    }
-
-    pub async fn handle_request(request_data: &str, handler: &impl RequestHandler) -> String {
-      let request = match serde_json::from_str(request_data) {
-        Ok(request) => request,
-        Err(error) => {
-          println!("{}", &error);
-          return crate::server::serialize_error(error.to_string());
-        }
-      };
-
-      match request {
+    pub async fn _handle_request<E>(request: QualifiedRequest, handler: &(impl RequestHandler<Error = E> + ?Sized)) -> Result<String, E> {
+      let reply_data = match request {
         $(
           QualifiedRequest::$name(request) => {
-            crate::server::serialize_reply::<super::$name>(&handler.[<handle_ $name:snake>](request).await)
+            crate::server::serialize_response::<super::$name>(handler.[<handle_$name:snake>](request).await?)
           }
         )*
-      }
+      };
+
+      Ok(reply_data)
+    }
+
+    pub trait RequestHandler {
+      type Error: ToString;
+
+      $(
+        fn [<handle_$name:snake>](&self, request: requests::$name) -> impl Future<Output = Result<$response, Self::Error>>;
+      )*
     }
   }
 
   use private::QualifiedRequest;
 
+  impl<R: Request> From<R> for QualifiedRequest {
+    fn from(value: R) -> Self {
+      value.into()
+    }
+  }
+
   $(
     requests!(@def $name $fields);
-
-    impl Into<QualifiedRequest> for $name {
-      fn into(self) -> QualifiedRequest {
-        QualifiedRequest::$name(self)
-      }
-    }
 
     impl SealedRequest for $name {}
     impl Request for $name {

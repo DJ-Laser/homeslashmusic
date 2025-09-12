@@ -7,7 +7,6 @@ pub mod requests;
 pub mod server;
 mod types;
 
-pub use requests::private::QualifiedRequest;
 pub use types::*;
 
 pub(crate) mod private {
@@ -15,10 +14,10 @@ pub(crate) mod private {
 
   use serde::{Serialize, de::DeserializeOwned};
 
-  use super::QualifiedRequest;
+  use super::requests::private::QualifiedRequest;
 
   pub trait SealedRequest:
-    Debug + Clone + Serialize + DeserializeOwned + Into<QualifiedRequest>
+    Debug + Clone + Send + Sync + Serialize + DeserializeOwned + Into<QualifiedRequest>
   {
   }
 }

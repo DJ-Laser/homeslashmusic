@@ -799,6 +799,7 @@ dependencies = [
  "dashmap",
  "futures-concurrency",
  "hsm-ipc",
+ "hsm-plugin",
  "rand",
  "rodio",
  "smol",

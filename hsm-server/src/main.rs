@@ -13,8 +13,9 @@ mod signals;
 async fn run_servers(ex: &Arc<Executor<'static>>) -> Result<(), Box<dyn Error>> {
   let mut signal_handler = SignalHandler::init()?;
 
-  let (audio_server, message_tx) = AudioServer::init();
-  let ipc_server = IpcServer::new(message_tx.clone(), ex.clone())?;
+  let audio_server = AudioServer::init();
+
+  let ipc_server = IpcServer::new(audio_server.request_sender(), ex.clone())?;
   /*let mpris_server = MprisServer::init(
     message_tx.clone(),
     audio_server.register_event_listener().await,

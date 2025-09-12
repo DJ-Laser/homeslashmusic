@@ -37,7 +37,7 @@ impl<Tx> MprisImpl<Tx> {
   }
 }
 
-impl<Tx: RequestSender> MprisImpl<Tx> {
+impl<Tx: RequestSender + Send + Sync> MprisImpl<Tx> {
   async fn try_send<R: Request>(&self, request: R) -> fdo::Result<R::Response>
   where
     R::Response: Send,

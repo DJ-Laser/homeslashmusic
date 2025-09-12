@@ -1,7 +1,22 @@
-use hsm_ipc::{Event, Reply, Request};
+use hsm_ipc::{
+  Event, Reply, Request,
+  client::{deserialize_reply, serialize_request},
+};
+
+async fn send_request<R: Request>(sender: &(impl RequestSender + ?Sized), request: R) -> Reply<R> {
+  let reply_data = sender.send_json(serialize_request(request)).await;
+  deserialize_reply::<R>(&reply_data).expect("Hsm plugins should not fail json parsing")
+}
 
 pub trait RequestSender {
-  fn send_request<R: Request>(&self, request: R) -> impl Future<Output = Reply<R>> + Send + Sync;
+  fn send_json(&self, request_data: String) -> impl Future<Output = String> + Send + Sync;
+
+  fn send_request<R: Request>(&self, request: R) -> impl Future<Output = Reply<R>> + Send + Sync
+  where
+    Self: Send + Sync,
+  {
+    send_request(self, request)
+  }
 }
 
 /// An ipc client that is compiled into the `hsm-server` binary

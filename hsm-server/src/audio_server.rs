@@ -1,15 +1,16 @@
 use futures_concurrency::future::Race;
 use hsm_ipc::Event;
-use message::{Message, Query};
-use player::Player;
+use request_handler::RequestJson;
 use rodio::OutputStream;
 use smol::{
   channel::{self, Receiver, Sender},
   lock::Mutex,
 };
 
-pub mod message;
+use player::Player;
+
 mod player;
+mod request_handler;
 mod track;
 
 use thiserror::Error;
@@ -43,30 +44,32 @@ pub struct AudioServer {
   /// Mapping from cannonical path to track
   track_cache: TrackCache,
 
-  message_rx: Receiver<Message>,
+  request_data_tx: Sender<RequestJson>,
+  request_data_rx: Receiver<RequestJson>,
+
   player_event_rx: Receiver<Event>,
   event_broadcast_tx: Mutex<Vec<Sender<Event>>>,
 }
 
 impl AudioServer {
-  pub fn init() -> (Self, Sender<Message>) {
+  pub fn init() -> Self {
     let output_stream = rodio::OutputStreamBuilder::open_default_stream()
       .expect("Could not open default audio stream");
 
     let (player_event_tx, player_event_rx) = channel::unbounded();
-    let (message_tx, message_rx) = channel::unbounded();
+    let (request_data_tx, request_data_rx) = channel::unbounded();
 
-    (
-      Self {
-        player: Player::connect_new(player_event_tx, output_stream.mixer()),
-        track_cache: TrackCache::new(),
-        output_stream,
-        message_rx,
-        player_event_rx,
-        event_broadcast_tx: Mutex::new(Vec::new()),
-      },
-      message_tx,
-    )
+    Self {
+      player: Player::connect_new(player_event_tx, output_stream.mixer()),
+      track_cache: TrackCache::new(),
+      output_stream,
+
+      request_data_tx,
+      request_data_rx,
+
+      player_event_rx,
+      event_broadcast_tx: Mutex::new(Vec::new()),
+    }
   }
 
   pub async fn register_event_listener(&self) -> Receiver<Event> {
@@ -94,76 +97,27 @@ impl AudioServer {
     }
   }
 
-  async fn handle_query(&self, query: Query) {
-    let _ = match query {
-      Query::PlaybackState(mut tx) => tx.send(self.player.playback_state()),
-      Query::LoopMode(mut tx) => tx.send(self.player.loop_mode()),
-      Query::Shuffle(mut tx) => tx.send(self.player.shuffle().await),
-      Query::Volume(mut tx) => tx.send(self.player.volume().await),
-      Query::Position(mut tx) => tx.send(self.player.position().await),
-      Query::CurrentTrack(mut tx) => tx.send(self.player.current_track().await),
-      Query::CurrentTrackIndex(mut tx) => tx.send(self.player.current_track_index()),
-      Query::IpcTrackList(mut tx) => tx.send(self.player.get_track_list().await),
-    };
-  }
-
-  async fn handle_message(&self, message: Message) -> Result<(), AudioServerError> {
-    match message {
-      Message::Play => self.player.play().await?,
-      Message::Pause => self.player.pause().await?,
-      Message::Toggle => self.player.toggle_playback().await?,
-      Message::Stop => self.player.stop().await?,
-
-      Message::NextTrack => self.player.go_to_next_track().await?,
-      Message::PreviousTrack { soft } => self.player.go_to_previous_track(soft).await?,
-
-      Message::SetLoopMode(loop_mode) => self.player.set_loop_mode(loop_mode).await?,
-      Message::SetShuffle(shuffle) => self.player.set_shuffle(shuffle).await?,
-      Message::SetVolume(volume) => self.player.set_volume(volume).await?,
-
-      Message::Seek(seek_position) => self.player.seek(seek_position).await?,
-
-      Message::InsertTracks {
-        paths,
-        position,
-        mut error_tx,
-      } => {
-        println!("Loading tracks: {:?}", paths);
-        let (tracks, errors) = self.track_cache.get_or_load_tracks(paths).await;
-
-        for (path, error) in errors.iter() {
-          eprintln!("Could not load track {path:?}: {error}")
-        }
-
-        let _ = error_tx.send(errors);
-
-        for track in tracks.iter() {
-          println!("Loaded track {:?}", track.file_path());
-        }
-
-        self.player.insert_tracks(position, &tracks).await?;
-      }
-
-      Message::ClearTracks => self.player.clear_tracks().await?,
-
-      Message::Query(query) => self.handle_query(query).await,
-    }
-
-    Ok(())
-  }
-
-  async fn handle_messages(&self) -> Result<(), AudioServerError> {
+  async fn handle_requests(&self) -> Result<(), AudioServerError> {
     loop {
-      let message = self
-        .message_rx
+      let (request_data, mut reply_tx) = self
+        .request_data_rx
         .recv()
         .await
         .map_err(|_| AudioServerError::MessageChannelClosed)?;
-      if let Err(error) = self.handle_message(message).await {
-        if error.is_recoverable() {
-          eprintln!("{error}");
-        } else {
-          return Err(error);
+
+      match hsm_ipc::server::handle_request(&request_data, self).await {
+        Ok(reply_data) => {
+          reply_tx.send(reply_data);
+        }
+
+        Err((reply_data, error)) => {
+          reply_tx.send(reply_data);
+
+          if error.is_recoverable() {
+            eprintln!("{error}");
+          } else {
+            return Err(error);
+          }
         }
       }
     }
@@ -178,7 +132,7 @@ impl AudioServer {
           .await
           .map_err(AudioServerError::PlayerError)
       },
-      self.handle_messages(),
+      self.handle_requests(),
       self.forward_events(),
     )
       .race()

@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 hsm-ipc.workspace = true
+hsm-plugin.workspace = true
 
 rodio.workspace = true
 symphonia.workspace = true

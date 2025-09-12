@@ -34,10 +34,7 @@ impl<Tx> MprisServer<Tx> {
 impl<Tx: RequestSender + Send + Sync + 'static> Plugin<Tx> for MprisServer<Tx> {
   type Error = MprisServerError;
 
-  async fn init(request_tx: Tx) -> Result<Self, Self::Error>
-  where
-    Self: Sized,
-  {
+  async fn init(request_tx: Tx) -> Result<Self, Self::Error> {
     let (quit_tx, quit_rx) = channel::bounded(1);
 
     let server = Server::new(Self::BUS_NAME, MprisImpl::new(request_tx, quit_tx)).await?;

@@ -1,4 +1,4 @@
-use super::{QualifiedRequest, Reply, Request};
+use super::{Reply, Request, requests::private::QualifiedRequest};
 
 pub fn serialize_request(request: impl Request) -> String {
   let mut request_data = serde_json::to_string::<QualifiedRequest>(&request.into())
