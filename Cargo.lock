@@ -800,6 +800,7 @@ dependencies = [
  "futures-concurrency",
  "hsm-ipc",
  "hsm-plugin",
+ "hsm-plugin-mpris",
  "rand",
  "rodio",
  "smol",

@@ -1,41 +1,10 @@
 use std::{path::PathBuf, time::Duration};
 
-use async_oneshot as oneshot;
 use hsm_ipc::{
   LoopMode, PlaybackState, Track, TrackListSnapshot, requests, server::RequestHandler,
 };
-use smol::channel::Sender;
 
 use super::{AudioServer, AudioServerError};
-
-pub type RequestJson = (String, oneshot::Sender<String>);
-
-#[derive(Debug, Clone)]
-pub struct RequestSender {
-  request_data_tx: Sender<RequestJson>,
-}
-
-impl hsm_plugin::RequestSender for RequestSender {
-  async fn send_json(&self, request_data: String) -> String {
-    let (reply_tx, reply_rx) = oneshot::oneshot();
-    self
-      .request_data_tx
-      .send((request_data, reply_tx))
-      .await
-      .expect("AudioServer should not close the channel");
-    reply_rx
-      .await
-      .expect("AudioServer should not close the reply connection")
-  }
-}
-
-impl AudioServer {
-  pub fn request_sender(&self) -> RequestSender {
-    RequestSender {
-      request_data_tx: self.request_data_tx.clone(),
-    }
-  }
-}
 
 impl RequestHandler for AudioServer {
   type Error = AudioServerError;

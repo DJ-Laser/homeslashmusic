@@ -28,7 +28,7 @@ pub(crate) fn serialize_response<R: Request>(response: R::Response) -> String {
   reply_data
 }
 
-fn serialize_error(error: &impl ToString) -> String {
+pub fn serialize_error(error: &impl ToString) -> String {
   let mut reply_data = serde_json::to_string(&Err::<(), String>(error.to_string()))
     .expect("Replies should not fail to serialize");
   reply_data.push('\n');

@@ -21,17 +21,17 @@ pub enum MprisServerError {
   EventChannelClosed,
 }
 
-pub struct MprisServer<Tx> {
+pub struct MprisPlugin<Tx> {
   server: Server<MprisImpl<Tx>>,
 
   quit_rx: Receiver<()>,
 }
 
-impl<Tx> MprisServer<Tx> {
+impl<Tx> MprisPlugin<Tx> {
   pub const BUS_NAME: &str = "dev.djlaser.HomeSlashMusic";
 }
 
-impl<Tx: RequestSender + Send + Sync + 'static> Plugin<Tx> for MprisServer<Tx> {
+impl<Tx: RequestSender + Send + Sync + 'static> Plugin<Tx> for MprisPlugin<Tx> {
   type Error = MprisServerError;
 
   async fn init(request_tx: Tx) -> Result<Self, Self::Error> {

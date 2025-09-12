@@ -1,3 +1,5 @@
+use std::error::Error;
+
 use hsm_ipc::{
   Event, Reply, Request,
   client::{deserialize_reply, serialize_request},
@@ -22,7 +24,7 @@ pub trait RequestSender {
 /// An ipc client that is compiled into the `hsm-server` binary
 /// Communication is done via channels instead of json.
 pub trait Plugin<Tx: RequestSender> {
-  type Error;
+  type Error: Error + 'static;
 
   fn init(request_tx: Tx) -> impl Future<Output = Result<Self, Self::Error>> + Send
   where

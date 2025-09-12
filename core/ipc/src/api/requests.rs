@@ -26,6 +26,8 @@ macro_rules! requests {
   ) => {
 paste::paste! {
   pub(crate) mod private {
+    use std::error::Error;
+
     use crate::{requests};
     use super::*;
 
@@ -51,7 +53,7 @@ paste::paste! {
     }
 
     pub trait RequestHandler {
-      type Error: ToString;
+      type Error: Error;
 
       $(
         fn [<handle_$name:snake>](&self, request: requests::$name) -> impl Future<Output = Result<$response, Self::Error>>;
@@ -61,14 +63,14 @@ paste::paste! {
 
   use private::QualifiedRequest;
 
-  impl<R: Request> From<R> for QualifiedRequest {
-    fn from(value: R) -> Self {
-      value.into()
-    }
-  }
-
   $(
     requests!(@def $name $fields);
+
+    impl From<$name> for QualifiedRequest {
+      fn from(value: $name) -> Self {
+        QualifiedRequest::$name(value)
+      }
+    }
 
     impl SealedRequest for $name {}
     impl Request for $name {

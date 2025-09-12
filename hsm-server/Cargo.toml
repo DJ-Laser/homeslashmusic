@@ -3,9 +3,16 @@ name = "hsm-server"
 version.workspace = true
 edition.workspace = true
 
+[features]
+default = ["hsm-plugin-mpris"]
+
+hsm-plugin-mpris = ["dep:hsm-plugin-mpris"]
+
 [dependencies]
 hsm-ipc.workspace = true
 hsm-plugin.workspace = true
+
+hsm-plugin-mpris = { workspace = true, optional = true }
 
 rodio.workspace = true
 symphonia.workspace = true
