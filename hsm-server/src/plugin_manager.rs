@@ -1,8 +1,11 @@
+use std::sync::Arc;
+
 use async_oneshot as oneshot;
 use futures_concurrency::future::Race;
 use hsm_ipc::Event;
 use hsm_plugin::Plugin;
 use smol::{
+  Executor,
   channel::{self, Receiver, Sender},
   lock::Mutex,
 };
@@ -43,7 +46,7 @@ pub struct PluginRunner<P> {
   event_rx: Receiver<Event>,
 }
 
-impl<P: Plugin<RequestSender>> PluginRunner<P> {
+impl<'ex, P: Plugin<'ex, RequestSender>> PluginRunner<P> {
   fn map_error(error: P::Error) -> PluginError {
     PluginError::PluginError(Box::new(error))
   }
@@ -71,25 +74,29 @@ impl<P: Plugin<RequestSender>> PluginRunner<P> {
 }
 
 #[derive(Debug)]
-pub struct PluginManager {
+pub struct PluginManager<'ex> {
+  executor: Arc<Executor<'ex>>,
+
   request_data_tx: Sender<RequestJson>,
 
   event_rx: Receiver<Event>,
   event_broadcast_tx: Mutex<Vec<Sender<Event>>>,
 }
 
-impl PluginManager {
-  pub fn new(request_data_tx: Sender<RequestJson>) -> (Self, Sender<Event>) {
+impl<'ex> PluginManager<'ex> {
+  pub fn new(executor: Arc<Executor<'ex>>) -> (Self, (Receiver<RequestJson>, Sender<Event>)) {
+    let (request_data_tx, request_data_rx) = channel::unbounded();
     let (event_tx, event_rx) = channel::unbounded();
 
     (
       Self {
+        executor,
         request_data_tx,
 
         event_rx,
         event_broadcast_tx: Mutex::new(Vec::new()),
       },
-      event_tx,
+      (request_data_rx, event_tx),
     )
   }
 
@@ -99,10 +106,10 @@ impl PluginManager {
     }
   }
 
-  pub async fn load_plugin<P: Plugin<RequestSender>>(
+  pub async fn load_plugin<P: Plugin<'ex, RequestSender>>(
     &self,
   ) -> Result<PluginRunner<P>, PluginError> {
-    let plugin = P::init(self.request_sender())
+    let plugin = P::init(self.request_sender(), self.executor.clone())
       .await
       .map_err(PluginRunner::<P>::map_error)?;
 

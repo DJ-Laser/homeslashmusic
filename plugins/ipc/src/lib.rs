@@ -4,7 +4,7 @@ use std::{
   sync::Arc,
 };
 
-use hsm_plugin::RequestSender;
+use hsm_plugin::{Plugin, RequestSender};
 use smol::{
   Executor,
   io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader},
@@ -27,29 +27,16 @@ pub enum IpcServerError {
   FailedToCreateSocket(#[source] io::Error),
 }
 
-pub struct IpcServer<'ex, Tx> {
+pub struct IpcPlugin<'ex, Tx> {
   socket_path: PathBuf,
-  request_sender: Tx,
-  ex: Arc<Executor<'ex>>,
+  request_tx: Tx,
+  executor: Arc<Executor<'ex>>,
 }
 
-impl<'ex, Tx> IpcServer<'ex, Tx> {
+impl<'ex, Tx> IpcPlugin<'ex, Tx> {
   fn is_socket_in_use(socket_path: &Path) -> Result<bool, IpcServerError> {
     let socket_in_use = fs::exists(socket_path).map_err(IpcServerError::CheckSocketFileFailed)?;
     Ok(socket_in_use)
-  }
-
-  pub fn new(request_sender: Tx, ex: Arc<Executor<'ex>>) -> Result<Self, IpcServerError> {
-    let socket_path = PathBuf::from(hsm_ipc::socket_path());
-    if Self::is_socket_in_use(&socket_path)? {
-      return Err(IpcServerError::SocketInUse);
-    }
-
-    Ok(Self {
-      socket_path,
-      request_sender,
-      ex,
-    })
   }
 
   fn cleanup_socket(&self) {
@@ -58,21 +45,41 @@ impl<'ex, Tx> IpcServer<'ex, Tx> {
   }
 }
 
-impl<'ex, Tx: RequestSender + Send + Sync + Clone + 'ex> IpcServer<'ex, Tx> {
-  pub async fn run(&self) -> Result<(), IpcServerError> {
+impl<'ex, Tx: RequestSender + Send + Sync + Clone + 'ex> Plugin<'ex, Tx> for IpcPlugin<'ex, Tx> {
+  type Error = IpcServerError;
+
+  async fn init(request_tx: Tx, executor: Arc<Executor<'ex>>) -> Result<Self, Self::Error>
+  where
+    Self: Sized,
+  {
+    let socket_path = PathBuf::from(hsm_ipc::socket_path());
+    if Self::is_socket_in_use(&socket_path)? {
+      return Err(IpcServerError::SocketInUse);
+    }
+
+    Ok(Self {
+      socket_path,
+      request_tx,
+      executor,
+    })
+  }
+
+  async fn on_event(&self, _event: hsm_ipc::Event) -> Result<(), Self::Error> {
+    Ok(())
+  }
+
+  async fn run(&self) -> Result<(), Self::Error> {
     let listener =
       UnixListener::bind(&self.socket_path).map_err(IpcServerError::FailedToCreateSocket)?;
 
     while let Some(stream) = listener.incoming().next().await {
-      let request_sender = self.request_sender.clone();
+      let request_tx = self.request_tx.clone();
 
       self
-        .ex
+        .executor
         .spawn(async {
           let res = if let Ok(stream) = stream {
-            StreamHandler::new(request_sender)
-              .handle_stream(stream)
-              .await
+            StreamHandler::new(request_tx).handle_stream(stream).await
           } else {
             stream.map(|_| ())
           };
@@ -89,19 +96,19 @@ impl<'ex, Tx: RequestSender + Send + Sync + Clone + 'ex> IpcServer<'ex, Tx> {
   }
 }
 
-impl<'ex, Tx> Drop for IpcServer<'ex, Tx> {
+impl<'ex, Tx> Drop for IpcPlugin<'ex, Tx> {
   fn drop(&mut self) {
     self.cleanup_socket();
   }
 }
 
 struct StreamHandler<Tx> {
-  request_sender: Tx,
+  request_tx: Tx,
 }
 
 impl<Tx> StreamHandler<Tx> {
-  fn new(request_sender: Tx) -> Self {
-    Self { request_sender }
+  fn new(request_tx: Tx) -> Self {
+    Self { request_tx }
   }
 }
 
@@ -111,7 +118,7 @@ impl<Tx: RequestSender> StreamHandler<Tx> {
     let mut stream_reader = BufReader::new(stream);
     stream_reader.read_line(&mut request_data).await?;
 
-    let reply_data = self.request_sender.send_json(request_data).await;
+    let reply_data = self.request_tx.send_json(request_data).await;
 
     let mut stream = stream_reader.into_inner();
     stream.write_all(&reply_data.as_bytes()).await?;

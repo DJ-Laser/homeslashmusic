@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use conversions::{as_dbus_time, as_loop_status, as_playback_status};
 use hsm_ipc::Event;
 use hsm_plugin::{Plugin, RequestSender};
@@ -6,7 +8,10 @@ use mpris_server::{
   Property, Server, Signal,
   zbus::{self},
 };
-use smol::channel::{self, Receiver};
+use smol::{
+  Executor,
+  channel::{self, Receiver},
+};
 use thiserror::Error;
 
 mod conversions;
@@ -31,10 +36,10 @@ impl<Tx> MprisPlugin<Tx> {
   pub const BUS_NAME: &str = "dev.djlaser.HomeSlashMusic";
 }
 
-impl<Tx: RequestSender + Send + Sync + 'static> Plugin<Tx> for MprisPlugin<Tx> {
+impl<'ex, Tx: RequestSender + Send + Sync + 'static> Plugin<'ex, Tx> for MprisPlugin<Tx> {
   type Error = MprisServerError;
 
-  async fn init(request_tx: Tx) -> Result<Self, Self::Error> {
+  async fn init(request_tx: Tx, _ex: Arc<Executor<'ex>>) -> Result<Self, Self::Error> {
     let (quit_tx, quit_rx) = channel::bounded(1);
 
     let server = Server::new(Self::BUS_NAME, MprisImpl::new(request_tx, quit_tx)).await?;

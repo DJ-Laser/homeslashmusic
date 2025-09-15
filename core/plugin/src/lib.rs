@@ -1,9 +1,10 @@
-use std::error::Error;
+use std::{error::Error, sync::Arc};
 
 use hsm_ipc::{
   Event, Reply, Request,
   client::{deserialize_reply, serialize_request},
 };
+use smol::Executor;
 
 async fn send_request<R: Request>(sender: &(impl RequestSender + ?Sized), request: R) -> Reply<R> {
   let reply_data = sender.send_json(serialize_request(request)).await;
@@ -23,10 +24,13 @@ pub trait RequestSender {
 
 /// An ipc client that is compiled into the `hsm-server` binary
 /// Communication is done via channels instead of json.
-pub trait Plugin<Tx: RequestSender> {
+pub trait Plugin<'ex, Tx: RequestSender> {
   type Error: Error + 'static;
 
-  fn init(request_tx: Tx) -> impl Future<Output = Result<Self, Self::Error>> + Send
+  fn init(
+    request_tx: Tx,
+    executor: Arc<Executor<'ex>>,
+  ) -> impl Future<Output = Result<Self, Self::Error>> + Send
   where
     Self: Sized;
 

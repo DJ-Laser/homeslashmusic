@@ -776,6 +776,17 @@ name = "hsm-plugin"
 version = "0.1.0"
 dependencies = [
  "hsm-ipc",
+ "smol",
+]
+
+[[package]]
+name = "hsm-plugin-ipc"
+version = "0.1.0"
+dependencies = [
+ "hsm-ipc",
+ "hsm-plugin",
+ "smol",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
@@ -800,6 +811,7 @@ dependencies = [
  "futures-concurrency",
  "hsm-ipc",
  "hsm-plugin",
+ "hsm-plugin-ipc",
  "hsm-plugin-mpris",
  "rand",
  "rodio",

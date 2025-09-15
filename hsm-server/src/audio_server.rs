@@ -1,9 +1,10 @@
 use std::{error::Error, fmt};
 
-use super::plugin_manager::{PluginManager, RequestJson};
+use super::plugin_manager::RequestJson;
 use futures_concurrency::future::Race;
+use hsm_ipc::Event;
 use rodio::OutputStream;
-use smol::channel::{self, Receiver};
+use smol::channel::{Receiver, Sender};
 
 use player::Player;
 
@@ -43,24 +44,19 @@ pub struct AudioServer {
   track_cache: TrackCache,
 
   request_data_rx: Receiver<RequestJson>,
-  plugin_manager: PluginManager,
 }
 
 impl AudioServer {
-  pub fn init() -> Self {
+  pub fn init((request_data_rx, event_tx): (Receiver<RequestJson>, Sender<Event>)) -> Self {
     let output_stream = rodio::OutputStreamBuilder::open_default_stream()
       .expect("Could not open default audio stream");
 
-    let (request_data_tx, request_data_rx) = channel::unbounded();
-    let (plugin_manager, player_event_tx) = PluginManager::new(request_data_tx);
-
     Self {
-      player: Player::connect_new(player_event_tx, output_stream.mixer()),
+      player: Player::connect_new(event_tx, output_stream.mixer()),
       track_cache: TrackCache::new(),
       output_stream,
 
       request_data_rx,
-      plugin_manager,
     }
   }
 
@@ -90,10 +86,6 @@ impl AudioServer {
     }
   }
 
-  pub fn plugin_manager(&self) -> &PluginManager {
-    &self.plugin_manager
-  }
-
   pub async fn run(&self) -> Result<(), AudioServerError> {
     (
       async {
@@ -117,7 +109,6 @@ impl fmt::Debug for AudioServer {
       .field("player", &self.player)
       .field("track_cache", &self.track_cache)
       .field("request_data_rx", &self.request_data_rx)
-      .field("plugin_manager", &self.plugin_manager)
       .finish()
   }
 }

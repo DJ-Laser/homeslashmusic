@@ -2,15 +2,14 @@ use std::sync::Arc;
 
 use audio_server::{AudioServer, AudioServerError};
 use futures_concurrency::future::Race;
+use hsm_plugin_ipc::IpcPlugin;
 use hsm_plugin_mpris::MprisPlugin;
-use ipc::{IpcServer, IpcServerError};
-use plugin_manager::{PluginError, PluginRunner};
+use plugin_manager::{PluginError, PluginManager, PluginRunner};
 use signals::{SignalHandler, SignalHandlerError};
 use smol::Executor;
 use thiserror::Error;
 
 mod audio_server;
-mod ipc;
 mod plugin_manager;
 mod signals;
 
@@ -23,30 +22,31 @@ pub enum MainError {
   SignalHandlerError(#[from] SignalHandlerError),
 
   #[error(transparent)]
-  IpcServerError(#[from] IpcServerError),
-
-  #[error(transparent)]
   PluginError(#[from] PluginError),
 }
 
 async fn run_servers(ex: &Arc<Executor<'static>>) -> Result<(), MainError> {
   let mut signal_handler = SignalHandler::init()?;
 
-  let audio_server = AudioServer::init();
-  let plugin_manager = audio_server.plugin_manager();
-
-  let ipc_server = IpcServer::new(plugin_manager.request_sender(), ex.clone())?;
+  let (plugin_manager, audio_server_channels) = PluginManager::new(ex.clone());
+  let audio_server = AudioServer::init(audio_server_channels);
 
   #[cfg(feature = "hsm-plugin-mpris")]
   let mpris_server: PluginRunner<MprisPlugin<_>> = plugin_manager.load_plugin().await?;
 
+  #[cfg(feature = "hsm-plugin-ipc")]
+  let ipc_server: PluginRunner<IpcPlugin<_>> = plugin_manager.load_plugin().await?;
+
   let server_futures = (
-    async move { ipc_server.run().await.map_err(Into::<MainError>::into) },
     async { audio_server.run().await.map_err(Into::into) },
     async { plugin_manager.run().await.map_err(Into::into) },
     #[cfg(feature = "hsm-plugin-mpris")]
     async {
       mpris_server.run().await.map_err(Into::into)
+    },
+    #[cfg(feature = "hsm-plugin-ipc")]
+    async {
+      ipc_server.run().await.map_err(Into::into)
     },
     async {
       signal_handler.wait_for_quit().await;
