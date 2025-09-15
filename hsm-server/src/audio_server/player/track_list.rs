@@ -55,14 +55,14 @@ impl TrackListInner {
   }
 
   pub fn clear(&mut self) {
-    debug_assert_eq!(self.track_list.len(), self.track_list.len());
+    debug_assert_eq!(self.track_list.len(), self.shuffled_track_indicies.len());
 
     self.track_list.clear();
     self.shuffled_track_indicies.clear();
   }
 
   pub fn len(&self) -> usize {
-    debug_assert_eq!(self.track_list.len(), self.track_list.len());
+    debug_assert_eq!(self.track_list.len(), self.shuffled_track_indicies.len());
 
     self.track_list.len()
   }
@@ -75,7 +75,7 @@ impl TrackListInner {
     index: usize,
     tracks: &[Arc<LoadedTrack>],
   ) -> impl Iterator<Item = usize> {
-    debug_assert_eq!(self.track_list.len(), self.track_list.len());
+    debug_assert_eq!(self.track_list.len(), self.shuffled_track_indicies.len());
 
     let track_instances = tracks.iter().map(|track| {
       let track_instance = TrackInstance {
@@ -105,7 +105,11 @@ impl TrackListInner {
   /// Returns the new index of `current_index`
   /// Currently `current_index` will always be moved to index 0
   fn shuffle_tracks(&mut self, current_index: usize, rng: &mut impl Rng) -> usize {
-    debug_assert_eq!(self.track_list.len(), self.track_list.len());
+    debug_assert_eq!(self.track_list.len(), self.shuffled_track_indicies.len());
+
+    if self.track_list.len() == 0 {
+      return 0;
+    }
 
     let current_track = self.shuffled_track_indicies.remove(current_index);
     self.shuffled_track_indicies.shuffle(rng);
@@ -119,7 +123,7 @@ impl TrackListInner {
   }
 
   fn order_tracks(&mut self) {
-    debug_assert_eq!(self.track_list.len(), self.track_list.len());
+    debug_assert_eq!(self.track_list.len(), self.shuffled_track_indicies.len());
 
     self.shuffled_track_indicies.clear();
     self
@@ -132,7 +136,7 @@ impl Index<usize> for TrackListInner {
   type Output = TrackInstance;
 
   fn index(&self, index: usize) -> &Self::Output {
-    debug_assert_eq!(self.track_list.len(), self.track_list.len());
+    debug_assert_eq!(self.track_list.len(), self.shuffled_track_indicies.len());
 
     &self.track_list[self.shuffled_track_indicies[index]]
   }
@@ -216,7 +220,11 @@ impl TrackList {
       Ok(new_index)
     } else {
       // After `order_tracks` is run `shuffled_track_indicies` maps exactly to `track_list`
-      let track_index = inner.shuffled_track_indicies[current_index];
+      let track_index = if inner.len() != 0 {
+        inner.shuffled_track_indicies[current_index]
+      } else {
+        0
+      };
 
       inner.order_tracks();
       Ok(track_index)
