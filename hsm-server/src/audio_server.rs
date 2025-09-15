@@ -1,4 +1,4 @@
-use std::error::Error;
+use std::{error::Error, fmt};
 
 use super::plugin_manager::{PluginManager, RequestJson};
 use futures_concurrency::future::Race;
@@ -107,5 +107,17 @@ impl AudioServer {
     )
       .race()
       .await
+  }
+}
+
+impl fmt::Debug for AudioServer {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    f.debug_struct("AudioServer")
+      .field("output_stream", &"OutputStream")
+      .field("player", &self.player)
+      .field("track_cache", &self.track_cache)
+      .field("request_data_rx", &self.request_data_rx)
+      .field("plugin_manager", &self.plugin_manager)
+      .finish()
   }
 }

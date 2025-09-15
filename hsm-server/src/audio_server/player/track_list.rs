@@ -37,7 +37,8 @@ impl Into<Arc<LoadedTrack>> for TrackInstance {
   }
 }
 
-/// `track_list` and `shuffle_order` must always have the same `len()``
+/// `track_list` and `shuffle_order` must always have the same `len()`
+#[derive(Debug)]
 struct TrackListInner {
   track_list: Vec<TrackInstance>,
   shuffled_track_indicies: Vec<usize>,
@@ -140,6 +141,7 @@ impl Index<usize> for TrackListInner {
 /// Manages the track list and index.
 ///
 /// To reduce the need for locking, relevant data is stored in atomics insteadd of locking the track list
+#[derive(Debug)]
 pub struct TrackList {
   inner: Mutex<TrackListInner>,
   track_list_len: AtomicUsize,

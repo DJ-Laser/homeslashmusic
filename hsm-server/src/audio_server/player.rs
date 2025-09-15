@@ -33,6 +33,7 @@ mod decoder;
 mod output;
 mod track_list;
 
+#[derive(Debug)]
 struct Controls {
   pub playback_state: AtomicPlaybackState,
   pub loop_mode: AtomicLoopMode,
@@ -84,6 +85,7 @@ impl PlayerError {
   }
 }
 
+#[derive(Debug)]
 pub struct Player {
   tracks: TrackList,
   current_track_index: AtomicUsize,

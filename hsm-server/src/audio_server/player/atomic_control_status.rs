@@ -2,6 +2,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use hsm_ipc::{LoopMode, PlaybackState};
 
+#[derive(Debug)]
 pub struct AtomicPlaybackState(AtomicUsize);
 
 #[allow(dead_code)]
@@ -52,6 +53,7 @@ impl AtomicPlaybackState {
   }
 }
 
+#[derive(Debug)]
 pub struct AtomicLoopMode(AtomicUsize);
 
 #[allow(dead_code)]

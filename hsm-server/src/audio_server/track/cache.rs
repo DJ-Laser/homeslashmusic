@@ -11,6 +11,7 @@ use super::{LoadTrackError, LoadedTrack};
 type Tracks = Vec<Arc<LoadedTrack>>;
 type Errors = Vec<(PathBuf, LoadTrackError)>;
 
+#[derive(Debug)]
 pub struct TrackCache {
   loaded_tracks: DashMap<PathBuf, Weak<LoadedTrack>>,
 }

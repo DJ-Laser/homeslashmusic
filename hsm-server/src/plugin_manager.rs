@@ -70,6 +70,7 @@ impl<P: Plugin<RequestSender>> PluginRunner<P> {
   }
 }
 
+#[derive(Debug)]
 pub struct PluginManager {
   request_data_tx: Sender<RequestJson>,
 
