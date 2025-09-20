@@ -1,8 +1,8 @@
 use std::{path::PathBuf, time::Duration};
 
-use super::{
-  InsertPosition, LoopMode, PlaybackState, Request, SeekPosition, Track, TrackListSnapshot,
-  Version, private::SealedRequest,
+use crate::{
+  InsertPosition, LoopMode, PlaybackState, Request, SeekPosition, TrackId, TrackInstance, Version,
+  private::SealedRequest,
 };
 
 macro_rules! requests {
@@ -90,8 +90,9 @@ requests! {
   StopPlayback() -> ();
   TogglePlayback() -> ();
 
-  QueryCurrentTrack() -> Option<Track>;
-  QueryCurrentTrackIndex() -> usize;
+  QueryCurrentTrack() -> Option<TrackInstance>;
+  QueryCurrentTrackId() -> Option<TrackId>;
+
   NextTrack() -> ();
   PreviousTrack {
     /// Restarts the track instead of going to the previous track if enough time has passed
@@ -110,7 +111,9 @@ requests! {
   QueryPosition() -> Duration;
   Seek(SeekPosition) -> ();
 
-  QueryTrackList() -> TrackListSnapshot;
+  QueryTrackList() -> Vec<TrackInstance>;
+  QueryTrackListIds() -> Vec<TrackId>;
+
   ClearTracks() -> ();
   LoadTracks(InsertPosition, Vec<PathBuf>) -> Vec<(PathBuf, String)>;
 }

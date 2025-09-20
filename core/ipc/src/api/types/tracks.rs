@@ -2,8 +2,14 @@ use std::{collections::HashSet, path::PathBuf, time::Duration};
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+/// Loaded data for a single audio track, typically one per file
+/// Many `TrackId`s can be instances of the same `TrackMetadata`
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TrackMetadata {
+  /// The cannonical, non-symlink file path
+  pub file_path: PathBuf,
+  pub total_duration: Option<Duration>,
+
   pub title: Option<String>,
   pub artists: HashSet<String>,
   pub album: Option<String>,
@@ -13,39 +19,15 @@ pub struct TrackMetadata {
   pub comments: Vec<String>,
 }
 
+/// A unique id given to an instance of a `Track` in the track list
+/// If there are multiple instances of the same track, each will have
+/// a different `TrackId`
+pub type TrackId = usize;
+
+/// An instance of a track in the track list
+/// The same track or file may have many instances, and each will have a unique id
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Track {
-  /// The cannonical, non-symlink file path
-  pub file_path: PathBuf,
-  pub total_duration: Option<Duration>,
+pub struct TrackInstance {
+  pub id: TrackId,
   pub metadata: TrackMetadata,
-}
-
-/// A representation of the player's track list
-/// `track_list.len()` will always be equal to `shuffle_indicies.len()`
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TrackListSnapshot {
-  pub track_list: Vec<Track>,
-  pub shuffle_indicies: Vec<usize>,
-}
-
-pub enum TrackListUpdate {
-  Insert {
-    index: usize,
-    tracks: Vec<Track>,
-    new_shuffle_indicies: Vec<usize>,
-  },
-
-  Remove {
-    removed_indicies: Vec<usize>,
-    new_shuffle_indicies: Vec<usize>,
-  },
-
-  Replace(TrackListSnapshot),
-
-  Clear,
-
-  Shuffle {
-    new_shuffle_indicies: Vec<usize>,
-  },
 }

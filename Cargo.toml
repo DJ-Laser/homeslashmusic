@@ -4,7 +4,6 @@ members = [
   "hsm-server",
   "hsm-cli",
   "core/ipc",
-  "core/client",
   "core/plugin",
   "plugins/mpris",
   "plugins/ipc"
@@ -16,7 +15,6 @@ edition = "2024"
 
 [workspace.dependencies]
 hsm-ipc = { path = "./core/ipc" }
-hsm-client = { path = "./core/client" }
 hsm-plugin = { path = "./core/plugin" }
 
 hsm-plugin-mpris = { path = "./plugins/mpris" }

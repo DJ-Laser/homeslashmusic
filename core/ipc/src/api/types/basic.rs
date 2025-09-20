@@ -2,6 +2,8 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use super::TrackId;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Version(pub String);
 
@@ -30,7 +32,7 @@ pub enum SeekPosition {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InsertPosition {
-  Absolute(usize),
+  After(TrackId),
   Next,
   Start,
   End,
