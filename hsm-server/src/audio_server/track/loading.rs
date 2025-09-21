@@ -3,23 +3,21 @@ use std::{
   path::{Path, PathBuf},
 };
 
-use hsm_ipc::{Track, TrackMetadata};
+use hsm_ipc::TrackMetadata;
 use symphonia::core::{
-  audio::SignalSpec,
-  codecs::{CODEC_TYPE_NULL, Decoder, DecoderOptions},
-  errors::Error as SymphoniaError,
-  formats::{FormatOptions, FormatReader},
+  codecs::CODEC_TYPE_NULL,
+  formats::FormatOptions,
   io::MediaSourceStream,
   meta::{Metadata, MetadataOptions, StandardTagKey, Tag, Value},
   probe::{Hint, ProbeResult},
 };
 
-use super::{LoadTrackError, LoadedTrack};
+use super::LoadTrackError;
 
 /// Use the default symphonia probe and the path's extension as a `Hint`
 ///
 /// This function is synchronous, so it must be called inside of `smol::unblock`
-pub fn probe_track_sync(path: &Path) -> Result<ProbeResult, LoadTrackError> {
+fn probe_track_sync(path: &Path) -> Result<ProbeResult, LoadTrackError> {
   let mut hint = Hint::new();
   if let Some(extension) = path.extension().and_then(|s| s.to_str()) {
     hint.with_extension(extension);
@@ -41,40 +39,7 @@ pub fn probe_track_sync(path: &Path) -> Result<ProbeResult, LoadTrackError> {
   Ok(probed)
 }
 
-fn decode_first_frame_sync<'f, 'd>(
-  format: &'f mut Box<dyn FormatReader>,
-  decoder: &'d mut Box<dyn Decoder>,
-  track_id: u32,
-) -> Result<SignalSpec, LoadTrackError> {
-  let decoded = loop {
-    let current_span = match format.next_packet() {
-      Ok(packet) => packet,
-      Err(error) => return Err(LoadTrackError::DecodingFailed(error)),
-    };
-
-    // If the packet does not belong to the selected track, skip over it
-    if current_span.track_id() != track_id {
-      continue;
-    }
-
-    match decoder.decode(&current_span) {
-      Ok(decoded) => break decoded,
-      Err(error) => match error {
-        SymphoniaError::DecodeError(_) => {
-          // Decode errors are intentionally ignored with no retry limit.
-          // This behavior ensures that the decoder skips over problematic packets
-          // and continues processing the rest of the stream.
-          continue;
-        }
-        _ => return Err(LoadTrackError::DecodingFailed(error)),
-      },
-    }
-  };
-
-  return Ok(decoded.spec().clone());
-}
-
-pub fn add_tag_to_metadata(metadata: &mut TrackMetadata, tag: &Tag) {
+fn add_tag_to_metadata(metadata: &mut TrackMetadata, tag: &Tag) {
   match tag.std_key {
     Some(StandardTagKey::TrackTitle) => {
       if let Value::String(title) = &tag.value {
@@ -138,11 +103,8 @@ fn update_metadata(metadata: &mut TrackMetadata, metadata_log: &mut Metadata) {
 }
 
 /// Load a `Track` from a specified file path
-/// This will attempt to decode the first audio packet to ensure a correct `AudioSpec`
-pub async fn load_file(path: PathBuf) -> Result<LoadedTrack, LoadTrackError> {
-  let outer_path = path.clone();
-
-  let (total_duration, spec, metadata) = smol::unblock(move || {
+pub async fn load_file(path: PathBuf) -> Result<TrackMetadata, LoadTrackError> {
+  let track_metadata = smol::unblock(move || {
     let mut probed = probe_track_sync(&path)?;
 
     let audio_track = probed
@@ -151,7 +113,6 @@ pub async fn load_file(path: PathBuf) -> Result<LoadedTrack, LoadTrackError> {
       .iter()
       .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
       .ok_or(LoadTrackError::CodecNotSupported)?;
-    let track_id = audio_track.id;
 
     let codec_params = &audio_track.codec_params;
 
@@ -160,13 +121,8 @@ pub async fn load_file(path: PathBuf) -> Result<LoadedTrack, LoadTrackError> {
       .zip(codec_params.n_frames)
       .map(|(base, spans)| base.calc_time(spans).into());
 
-    let mut decoder = symphonia::default::get_codecs()
-      .make(&audio_track.codec_params, &DecoderOptions::default())
-      .map_err(|_| LoadTrackError::CodecNotSupported)?;
-
-    let spec = decode_first_frame_sync(&mut probed.format, &mut decoder, track_id)?;
-
-    let mut track_metadata = Default::default();
+    let mut track_metadata = TrackMetadata::new_empty(path);
+    track_metadata.total_duration = total_duration;
 
     if let Some(mut metadata) = probed.metadata.get() {
       update_metadata(&mut track_metadata, &mut metadata)
@@ -174,16 +130,9 @@ pub async fn load_file(path: PathBuf) -> Result<LoadedTrack, LoadTrackError> {
 
     update_metadata(&mut track_metadata, &mut probed.format.metadata());
 
-    Ok((total_duration, spec, track_metadata))
+    Ok(track_metadata)
   })
   .await?;
 
-  Ok(LoadedTrack {
-    inner: Track {
-      file_path: outer_path,
-      total_duration,
-      metadata,
-    },
-    spec,
-  })
+  Ok(track_metadata)
 }

@@ -11,7 +11,7 @@ use async_oneshot as oneshot;
 use controlled_source::{SeekError, SourceEvent, wrap_source};
 use decoder::TrackDecoder;
 use hsm_ipc::{
-  Event, InsertPosition, LoopMode, PlaybackState, SeekPosition, Track, TrackListSnapshot,
+  Event, InsertPosition, LoopMode, PlaybackState, SeekPosition, TrackId, TrackMetadata,
 };
 use output::SourceQueueState;
 use rodio::{Source, mixer::Mixer};
@@ -22,9 +22,9 @@ use smol::{
 
 use atomic_control_status::{AtomicLoopMode, AtomicPlaybackState};
 use thiserror::Error;
-use track_list::TrackList;
+use track_list::{ArcTrackInstance, TrackList};
 
-use super::track::{LoadTrackError, LoadedTrack};
+use super::track::LoadTrackError;
 pub use output::PlayerAudioOutput;
 
 mod atomic_control_status;
@@ -70,6 +70,9 @@ pub enum PlayerError {
 
   #[error("Failed to load track: {0}")]
   LoadTrack(#[from] LoadTrackError),
+
+  #[error("Track id {0} not in track list")]
+  TrackIdNotFound(TrackId),
 
   #[error("failed to seek: ")]
   SeekFailed(#[from] SeekError),
@@ -130,9 +133,9 @@ impl Player {
 
   async fn load_track_source(
     &self,
-    track: &Arc<LoadedTrack>,
+    track: &Arc<TrackMetadata>,
   ) -> Result<Box<dyn Source + Send + 'static>, LoadTrackError> {
-    let decoder = TrackDecoder::new(track.clone()).await?;
+    let decoder = TrackDecoder::new(track.file_path.clone()).await?;
 
     Ok(Box::new(wrap_source(
       decoder,
@@ -154,7 +157,7 @@ impl Player {
   /// If it is not ensured that the queue is empty beforehand it can cause an infinite loop and lockup
   async fn queue_track(
     &self,
-    track: &Arc<LoadedTrack>,
+    track: &Arc<TrackMetadata>,
     wait_for_empty_queue: bool,
   ) -> Result<(), LoadTrackError> {
     let source = self.load_track_source(track).await?;
@@ -217,11 +220,11 @@ impl Player {
     };
 
     if load_necessary {
-      self.queue_track(&current_track, true).await?;
+      self.queue_track(&current_track.metadata, true).await?;
     }
 
     if let Some(next_track) = next_track {
-      self.queue_track(&next_track, false).await?;
+      self.queue_track(&next_track.metadata, false).await?;
     }
 
     Ok(true)
@@ -289,15 +292,11 @@ impl Player {
     Ok(())
   }
 
-  pub async fn current_track(&self) -> Option<Track> {
+  pub async fn current_track(&self) -> Option<ArcTrackInstance> {
     self
       .tracks
       .get_track(self.current_track_index.load(Ordering::Acquire))
       .await
-  }
-
-  pub fn current_track_index(&self) -> usize {
-    self.current_track_index.load(Ordering::Acquire)
   }
 
   async fn stop_or_wrap_track(&self, reverse: bool) -> Result<(), PlayerError> {
@@ -394,7 +393,7 @@ impl Player {
         if let Some((_, Some(next_track))) =
           self.tracks.get_tracks_to_queue(current_track_index).await
         {
-          self.queue_track(&next_track, true).await?;
+          self.queue_track(&next_track.metadata, true).await?;
         }
       }
     }
@@ -458,6 +457,10 @@ impl Player {
     Ok(())
   }
 
+  pub async fn get_tracks(&self) -> Vec<ArcTrackInstance> {
+    self.tracks.get_tracks().await
+  }
+
   pub async fn clear_tracks(&self) -> Result<(), PlayerError> {
     self.stop().await?;
     self.tracks.clear().await?;
@@ -467,15 +470,11 @@ impl Player {
     Ok(())
   }
 
-  pub async fn get_track_list(&self) -> TrackListSnapshot {
-    self.tracks.get_snapshot().await
-  }
-
   /// Inserts new tracks at a specified position in the track list
   pub async fn insert_tracks(
     &self,
     position: InsertPosition,
-    tracks: &[Arc<LoadedTrack>],
+    tracks: &[Arc<TrackMetadata>],
   ) -> Result<(), PlayerError> {
     let current_index = self.current_track_index.load(Ordering::Acquire);
 

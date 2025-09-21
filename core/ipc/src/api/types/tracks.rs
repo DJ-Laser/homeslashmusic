@@ -19,6 +19,24 @@ pub struct TrackMetadata {
   pub comments: Vec<String>,
 }
 
+impl TrackMetadata {
+  /// Creates an empty `TrackMetadata` from a file path
+  pub fn new_empty(file_path: PathBuf) -> Self {
+    Self {
+      file_path,
+      total_duration: None,
+
+      title: None,
+      artists: HashSet::new(),
+      album: None,
+      track_number: None,
+      date: None,
+      genres: HashSet::new(),
+      comments: Vec::new(),
+    }
+  }
+}
+
 /// A unique id given to an instance of a `Track` in the track list
 /// If there are multiple instances of the same track, each will have
 /// a different `TrackId`

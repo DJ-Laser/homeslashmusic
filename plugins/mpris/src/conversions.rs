@@ -5,7 +5,7 @@ use std::{
   time::Duration,
 };
 
-use hsm_ipc::{LoopMode, PlaybackState, Track};
+use hsm_ipc::{LoopMode, PlaybackState, TrackMetadata};
 use mpris_server::zbus::zvariant::ObjectPath;
 
 pub fn as_playback_status(playback_state: PlaybackState) -> mpris_server::PlaybackStatus {
@@ -40,29 +40,28 @@ pub fn from_dbus_time(time: mpris_server::Time) -> Duration {
   Duration::from_micros(time.as_micros() as u64)
 }
 
-pub fn generate_metadata(track: &Track) -> mpris_server::Metadata {
+pub fn generate_metadata(track: TrackMetadata) -> mpris_server::Metadata {
   let track_id = ObjectPath::from_static_str_unchecked("/dev/djlaser/HomeSlashMusic/DefaultTrack");
 
-  let metadata = track.metadata.clone();
   let mut builder = mpris_server::Metadata::builder()
     .trackid(track_id)
-    .artist(metadata.artists)
-    .genre(metadata.genres)
-    .comment(metadata.comments);
+    .artist(track.artists)
+    .genre(track.genres)
+    .comment(track.comments);
 
-  if let Some(title) = metadata.title {
+  if let Some(title) = track.title {
     builder = builder.title(title);
   }
 
-  if let Some(album) = metadata.album {
+  if let Some(album) = track.album {
     builder = builder.album(album);
   }
 
-  if let Some(track_number) = metadata.track_number {
+  if let Some(track_number) = track.track_number {
     builder = builder.track_number(track_number as i32);
   }
 
-  if let Some(date) = metadata.date {
+  if let Some(date) = track.date {
     builder = builder.content_created(date);
   }
 

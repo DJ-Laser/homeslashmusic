@@ -4,16 +4,17 @@ use std::{
 };
 
 use dashmap::DashMap;
+use hsm_ipc::TrackMetadata;
 use smol::{fs, stream::StreamExt};
 
-use super::{LoadTrackError, LoadedTrack};
+use super::LoadTrackError;
 
-type Tracks = Vec<Arc<LoadedTrack>>;
+type Tracks = Vec<Arc<TrackMetadata>>;
 type Errors = Vec<(PathBuf, LoadTrackError)>;
 
 #[derive(Debug)]
 pub struct TrackCache {
-  loaded_tracks: DashMap<PathBuf, Weak<LoadedTrack>>,
+  loaded_tracks: DashMap<PathBuf, Weak<TrackMetadata>>,
 }
 
 impl TrackCache {
@@ -27,7 +28,7 @@ impl TrackCache {
   async fn get_or_load_track(
     &self,
     path: PathBuf,
-  ) -> Result<Arc<LoadedTrack>, (PathBuf, LoadTrackError)> {
+  ) -> Result<Arc<TrackMetadata>, (PathBuf, LoadTrackError)> {
     let cannnonical_path = super::get_cannonical_track_path(&path)
       .await
       .map_err(|error| (path.clone(), error))?;
@@ -44,7 +45,7 @@ impl TrackCache {
       );
       self
         .loaded_tracks
-        .insert(track.file_path().to_path_buf(), Arc::downgrade(&track));
+        .insert(track.file_path.to_path_buf(), Arc::downgrade(&track));
 
       return Ok(track);
     };
@@ -56,15 +57,14 @@ impl TrackCache {
   /// Tracks without these will be sorted to the end
   async fn sort_tracks(&self, tracks: &mut Tracks) {
     // Sort by title if available, othewise by file name
-    fn get_track_title(track: &Arc<LoadedTrack>) -> String {
+    fn get_track_title(track: &Arc<TrackMetadata>) -> String {
       track
-        .metadata()
         .title
         .as_ref()
         .map(|s| s.to_lowercase())
         .or_else(|| {
           track
-            .file_path()
+            .file_path
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
         })
@@ -72,8 +72,8 @@ impl TrackCache {
     }
 
     tracks.sort_by_key(|track| get_track_title(track));
-    tracks.sort_by_key(|track| track.metadata().track_number);
-    tracks.sort_by(|track_a, track_b| track_a.metadata().album.cmp(&track_b.metadata().album));
+    tracks.sort_by_key(|track| track.track_number);
+    tracks.sort_by(|track_a, track_b| track_a.album.cmp(&track_b.album));
   }
 
   async fn search_directory(&self, path: PathBuf, outer_tracks: &mut Tracks, errors: &mut Errors) {

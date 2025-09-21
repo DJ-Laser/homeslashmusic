@@ -6,43 +6,34 @@ use std::{
   },
 };
 
-use hsm_ipc::{InsertPosition, Track, TrackListSnapshot};
+use hsm_ipc::{InsertPosition, TrackId, TrackInstance, TrackMetadata};
 use rand::{Rng, seq::SliceRandom};
 use smol::lock::Mutex;
-
-use crate::audio_server::track::LoadedTrack;
 
 use super::PlayerError;
 
 /// A `LoadedTrack` with a track_id to uniquely identify it
 #[derive(Debug, Clone)]
-pub struct TrackInstance {
-  track: Arc<LoadedTrack>,
-  track_id: usize,
+pub struct ArcTrackInstance {
+  pub id: TrackId,
+  pub metadata: Arc<TrackMetadata>,
 }
 
-impl TrackInstance {
-  pub fn loaded_track(&self) -> &LoadedTrack {
-    &self.track
-  }
-
-  pub fn track_id(&self) -> usize {
-    self.track_id
-  }
-}
-
-impl Into<Arc<LoadedTrack>> for TrackInstance {
-  fn into(self) -> Arc<LoadedTrack> {
-    self.track
+impl ArcTrackInstance {
+  pub fn into_owned_instance(&self) -> TrackInstance {
+    TrackInstance {
+      id: self.id,
+      metadata: TrackMetadata::clone(&self.metadata),
+    }
   }
 }
 
 /// `track_list` and `shuffle_order` must always have the same `len()`
 #[derive(Debug)]
 struct TrackListInner {
-  track_list: Vec<TrackInstance>,
+  track_list: Vec<ArcTrackInstance>,
   shuffled_track_indicies: Vec<usize>,
-  latest_track_id: usize,
+  latest_track_id: TrackId,
 }
 
 impl TrackListInner {
@@ -73,14 +64,14 @@ impl TrackListInner {
   pub fn insert_tracks(
     &mut self,
     index: usize,
-    tracks: &[Arc<LoadedTrack>],
+    tracks: &[Arc<TrackMetadata>],
   ) -> impl Iterator<Item = usize> {
     debug_assert_eq!(self.track_list.len(), self.shuffled_track_indicies.len());
 
     let track_instances = tracks.iter().map(|track| {
-      let track_instance = TrackInstance {
-        track: track.clone(),
-        track_id: self.latest_track_id,
+      let track_instance = ArcTrackInstance {
+        metadata: track.clone(),
+        id: self.latest_track_id,
       };
 
       self.latest_track_id += 1;
@@ -133,7 +124,7 @@ impl TrackListInner {
 }
 
 impl Index<usize> for TrackListInner {
-  type Output = TrackInstance;
+  type Output = ArcTrackInstance;
 
   fn index(&self, index: usize) -> &Self::Output {
     debug_assert_eq!(self.track_list.len(), self.shuffled_track_indicies.len());
@@ -165,7 +156,7 @@ impl TrackList {
     self.track_list_len.load(Ordering::Acquire)
   }
 
-  pub async fn get_track(&self, index: usize) -> Option<Track> {
+  pub async fn get_track(&self, index: usize) -> Option<ArcTrackInstance> {
     let num_tracks = self.track_list_len.load(Ordering::Acquire);
 
     if index >= num_tracks {
@@ -173,14 +164,14 @@ impl TrackList {
     }
 
     let inner = self.inner.lock().await;
-    Some(inner[index].loaded_track().clone_track())
+    Some(inner[index].clone())
   }
 
   /// Returns `None` if the track list length is zero
   pub async fn get_tracks_to_queue(
     &self,
     index: usize,
-  ) -> Option<(Arc<LoadedTrack>, Option<Arc<LoadedTrack>>)> {
+  ) -> Option<(ArcTrackInstance, Option<ArcTrackInstance>)> {
     let num_tracks = self.track_list_len.load(Ordering::Acquire);
 
     if index >= num_tracks {
@@ -189,11 +180,11 @@ impl TrackList {
 
     let inner = self.inner.lock().await;
 
-    let current_track = inner[index].track.clone();
+    let current_track = inner[index].clone();
 
     let is_last_track = index == num_tracks - 1;
     let next_track = if !is_last_track {
-      Some(inner[index + 1].track.clone())
+      Some(inner[index + 1].clone())
     } else {
       None
     };
@@ -244,7 +235,7 @@ impl TrackList {
     &self,
     current_index: usize,
     position: InsertPosition,
-    tracks: &[Arc<LoadedTrack>],
+    tracks: &[Arc<TrackMetadata>],
   ) -> Result<usize, PlayerError> {
     let mut inner = self.inner.lock().await;
 
@@ -254,16 +245,27 @@ impl TrackList {
 
     let track_list_started_empty = inner.len() == 0;
 
-    // Insert `Next` tracks into the tracks list after the current song, even if it has been shuffled
-    let track_index = if !track_list_started_empty {
-      inner.shuffled_track_indicies[current_index]
-    } else {
-      0
-    };
-
     let insert_index = match position {
-      InsertPosition::Absolute(position) => position.clamp(0, inner.len()),
-      InsertPosition::Next => track_index.saturating_add_signed(1),
+      InsertPosition::After(track_id) => {
+        let track_index = inner
+          .track_list
+          .iter()
+          .map(|track| track.id)
+          .find(|id| *id == track_id)
+          .ok_or(PlayerError::TrackIdNotFound(track_id))?;
+
+        track_index + 1
+      }
+      InsertPosition::Next => {
+        // Insert tracks into the tracks list after the current song, even if it has been shuffled
+        let current_track_index = if !track_list_started_empty {
+          inner.shuffled_track_indicies[current_index]
+        } else {
+          0
+        };
+
+        current_track_index.saturating_add_signed(1)
+      }
       InsertPosition::Start => 0,
       InsertPosition::End => inner.len(),
       InsertPosition::Replace => 0,
@@ -302,18 +304,9 @@ impl TrackList {
     }
   }
 
-  pub async fn get_snapshot(&self) -> TrackListSnapshot {
+  pub async fn get_tracks(&self) -> Vec<ArcTrackInstance> {
     let inner = self.inner.lock().await;
 
-    let track_list = inner
-      .track_list
-      .iter()
-      .map(|track_instance| track_instance.loaded_track().clone_track())
-      .collect();
-
-    TrackListSnapshot {
-      track_list,
-      shuffle_indicies: inner.shuffled_track_indicies.clone(),
-    }
+    inner.track_list.clone()
   }
 }

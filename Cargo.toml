@@ -20,7 +20,7 @@ hsm-plugin = { path = "./core/plugin" }
 hsm-plugin-mpris = { path = "./plugins/mpris" }
 hsm-plugin-ipc = { path = "./plugins/ipc" }
 
-rodio = { version = "0.21.1", default-features = false, features = ["playback"] }
+rodio = { version = "0.21.1", default-features = false, features = ["playback", "symphonia"] }
 symphonia = { version = "0.5.4", features = ["mp3", "isomp4", "aac"] }
 smol = "2.0.2"
 rustix = { version = "1.0.8", features = ["process"] }

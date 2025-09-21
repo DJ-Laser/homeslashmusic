@@ -1,8 +1,6 @@
 use std::{path::PathBuf, time::Duration};
 
-use hsm_ipc::{
-  LoopMode, PlaybackState, Track, TrackListSnapshot, requests, server::RequestHandler,
-};
+use hsm_ipc::{LoopMode, PlaybackState, TrackId, TrackInstance, requests, server::RequestHandler};
 
 use super::{AudioServer, AudioServerError};
 
@@ -48,17 +46,21 @@ impl RequestHandler for AudioServer {
   async fn handle_query_current_track(
     &self,
     _request: requests::QueryCurrentTrack,
-  ) -> Result<Option<Track>, Self::Error> {
-    let track = self.player.current_track().await;
+  ) -> Result<Option<TrackInstance>, Self::Error> {
+    let current_track = self.player.current_track().await;
+    let current_track = current_track.map(|track| track.into_owned_instance());
 
-    Ok(track)
+    Ok(current_track)
   }
 
-  async fn handle_query_current_track_index(
+  async fn handle_query_current_track_id(
     &self,
-    _request: requests::QueryCurrentTrackIndex,
-  ) -> Result<usize, Self::Error> {
-    Ok(self.player.current_track_index())
+    _request: requests::QueryCurrentTrackId,
+  ) -> Result<Option<TrackId>, Self::Error> {
+    let current_track = self.player.current_track().await;
+    let current_track_id = current_track.map(|track| track.id);
+
+    Ok(current_track_id)
   }
 
   async fn handle_next_track(&self, _request: requests::NextTrack) -> Result<(), Self::Error> {
@@ -128,8 +130,24 @@ impl RequestHandler for AudioServer {
   async fn handle_query_track_list(
     &self,
     _request: requests::QueryTrackList,
-  ) -> Result<TrackListSnapshot, Self::Error> {
-    Ok(self.player.get_track_list().await)
+  ) -> Result<Vec<TrackInstance>, Self::Error> {
+    let tracks = self.player.get_tracks().await;
+    let tracks = tracks
+      .into_iter()
+      .map(|track| track.into_owned_instance())
+      .collect();
+
+    Ok(tracks)
+  }
+
+  async fn handle_query_track_list_ids(
+    &self,
+    _request: requests::QueryTrackListIds,
+  ) -> Result<Vec<TrackId>, Self::Error> {
+    let tracks = self.player.get_tracks().await;
+    let track_ids = tracks.into_iter().map(|track| track.id).collect();
+
+    Ok(track_ids)
   }
 
   async fn handle_clear_tracks(&self, _request: requests::ClearTracks) -> Result<(), Self::Error> {
@@ -148,7 +166,7 @@ impl RequestHandler for AudioServer {
     }
 
     for track in tracks.iter() {
-      println!("Loaded track {:?}", track.file_path());
+      println!("Loaded track {:?}", track.file_path);
     }
 
     (self.player.insert_tracks(position, &tracks).await)?;

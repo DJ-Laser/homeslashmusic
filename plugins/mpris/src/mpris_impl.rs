@@ -222,7 +222,7 @@ impl<Tx: RequestSender + Send + Sync> PlayerInterface for MprisImpl<Tx> {
 
   async fn metadata(&self) -> fdo::Result<mpris_server::Metadata> {
     let metadata = match self.try_send(requests::QueryCurrentTrack).await? {
-      Some(track) => generate_metadata(&track),
+      Some(track) => generate_metadata(track.metadata),
       None => mpris_server::Metadata::builder()
         .trackid(mpris_server::TrackId::NO_TRACK)
         .build(),
