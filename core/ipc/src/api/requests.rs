@@ -103,11 +103,6 @@ requests! {
   /// Returns true if the track exists and was skipped to.
   GoToTrack(TrackId) -> bool;
 
-  /// Skip to the specified track if it exists and starts the track at the specified duration.
-  /// Note that if the duration is too large the track will not play and skip to the next one.
-  /// Returns true if the track exists and was skipped to.
-  GoToTrackAt(TrackId, Duration) -> bool;
-
   /// Skip to the specified index if it exists.
   /// Returns true if a song at the index exists and was skipped to.
   GoToQueueIndex(usize) -> bool;

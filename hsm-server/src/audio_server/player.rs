@@ -295,8 +295,36 @@ impl Player {
   pub async fn current_track(&self) -> Option<ArcTrackInstance> {
     self
       .tracks
-      .get_track(self.current_track_index.load(Ordering::Acquire))
+      .get_track_at(self.current_track_index.load(Ordering::Acquire))
       .await
+  }
+
+  pub async fn go_to_track(&self, track_id: TrackId) -> Result<bool, PlayerError> {
+    let Some(track_index) = self.tracks.get_track_index(track_id).await else {
+      return Ok(false);
+    };
+
+    self
+      .current_track_index
+      .store(track_index, Ordering::Release);
+
+    if !self.is_stopped() {
+      self.queue_current_track(false).await?;
+    }
+
+    Ok(true)
+  }
+
+  pub async fn go_to_index(&self, index: usize) -> Result<bool, PlayerError> {
+    if index >= self.tracks.len() {
+      return Ok(false);
+    }
+
+    if !self.is_stopped() {
+      self.queue_current_track(true).await?;
+    }
+
+    Ok(true)
   }
 
   async fn stop_or_wrap_track(&self, reverse: bool) -> Result<(), PlayerError> {

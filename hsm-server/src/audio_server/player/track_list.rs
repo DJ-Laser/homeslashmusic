@@ -156,7 +156,18 @@ impl TrackList {
     self.track_list_len.load(Ordering::Acquire)
   }
 
-  pub async fn get_track(&self, index: usize) -> Option<ArcTrackInstance> {
+  pub async fn get_track_index(&self, track_id: TrackId) -> Option<usize> {
+    let inner = self.inner.lock().await;
+    for index in 0..inner.len() {
+      if inner[index].id == track_id {
+        return Some(index);
+      }
+    }
+
+    None
+  }
+
+  pub async fn get_track_at(&self, index: usize) -> Option<ArcTrackInstance> {
     let num_tracks = self.track_list_len.load(Ordering::Acquire);
 
     if index >= num_tracks {

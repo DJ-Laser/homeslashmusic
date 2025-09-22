@@ -1,6 +1,8 @@
 use std::{path::PathBuf, time::Duration};
 
-use hsm_ipc::{LoopMode, PlaybackState, TrackId, TrackInstance, requests, server::RequestHandler};
+use hsm_ipc::{
+  LoopMode, PlaybackState, SeekPosition, TrackId, TrackInstance, requests, server::RequestHandler,
+};
 
 use super::{AudioServer, AudioServerError};
 
@@ -63,13 +65,30 @@ impl RequestHandler for AudioServer {
     Ok(current_track_id)
   }
 
-  async fn handle_next_track(&self, _request: requests::NextTrack) -> Result<(), Self::Error> {
+  async fn handle_go_to_track(
+    &self,
+    requests::GoToTrack(track_id): requests::GoToTrack,
+  ) -> Result<bool, Self::Error> {
+    Ok(self.player.go_to_track(track_id).await?)
+  }
+
+  async fn handle_go_to_queue_index(
+    &self,
+    requests::GoToQueueIndex(index): requests::GoToQueueIndex,
+  ) -> Result<bool, Self::Error> {
+    Ok(self.player.go_to_index(index).await?)
+  }
+
+  async fn handle_go_to_next_track(
+    &self,
+    _request: requests::GoToNextTrack,
+  ) -> Result<(), Self::Error> {
     Ok(self.player.go_to_next_track().await?)
   }
 
-  async fn handle_previous_track(
+  async fn handle_go_to_previous_track(
     &self,
-    requests::PreviousTrack { soft }: requests::PreviousTrack,
+    requests::GoToPreviousTrack { soft }: requests::GoToPreviousTrack,
   ) -> Result<(), Self::Error> {
     Ok(self.player.go_to_previous_track(soft).await?)
   }
@@ -120,16 +139,31 @@ impl RequestHandler for AudioServer {
     Ok(self.player.position().await)
   }
 
-  async fn handle_seek(
+  async fn handle_seek_current(
     &self,
-    requests::Seek(seek_position): requests::Seek,
+    requests::SeekCurrent(seek_offset): requests::SeekCurrent,
   ) -> Result<(), Self::Error> {
-    Ok(self.player.seek(seek_position).await?)
+    Ok(self.player.seek(seek_offset.into()).await?)
   }
 
-  async fn handle_query_track_list(
+  async fn handle_seek_to(
     &self,
-    _request: requests::QueryTrackList,
+    requests::SeekTo(track_id, position): requests::SeekTo,
+  ) -> Result<bool, Self::Error> {
+    if let Some(track) = self.player.current_track().await
+      && track.id == track_id
+    {
+      self.player.seek(SeekPosition::To(position)).await?;
+
+      Ok(true)
+    } else {
+      Ok(false)
+    }
+  }
+
+  async fn handle_query_queue_tracks(
+    &self,
+    _request: requests::QueryQueueTracks,
   ) -> Result<Vec<TrackInstance>, Self::Error> {
     let tracks = self.player.get_tracks().await;
     let tracks = tracks
@@ -140,9 +174,9 @@ impl RequestHandler for AudioServer {
     Ok(tracks)
   }
 
-  async fn handle_query_track_list_ids(
+  async fn handle_query_queue_track_ids(
     &self,
-    _request: requests::QueryTrackListIds,
+    _request: requests::QueryQueueTrackIds,
   ) -> Result<Vec<TrackId>, Self::Error> {
     let tracks = self.player.get_tracks().await;
     let track_ids = tracks.into_iter().map(|track| track.id).collect();
