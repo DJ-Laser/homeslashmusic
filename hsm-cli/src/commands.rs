@@ -2,7 +2,7 @@ use std::path::{self, PathBuf};
 
 use crate::cli::{Cli, Command, QueueCommand};
 use crate::ipc::send_request;
-use hsm_ipc::{InsertPosition, LoopMode, TrackInstance, requests};
+use hsm_ipc::{InsertPosition, LoopMode, SeekOffset, TrackInstance, requests};
 
 fn try_load_tracks(position: InsertPosition, paths: &[PathBuf]) -> Result<(), crate::Error> {
   let mut absolute_paths = Vec::new();
@@ -30,7 +30,7 @@ fn handle_queue_command(command: QueueCommand) -> Result<(), crate::Error> {
   Ok(())
 }
 
-fn print_track_list(tracks: Vec<TrackInstance>) {
+fn print_queue(tracks: Vec<TrackInstance>) {
   for TrackInstance { metadata, .. } in tracks {
     let title = metadata
       .title
@@ -55,8 +55,8 @@ pub fn handle_command(command: Cli) -> Result<(), crate::Error> {
     Command::PlayPause => send_request(requests::TogglePlayback)?,
     Command::Stop => send_request(requests::StopPlayback)?,
 
-    Command::Next => send_request(requests::NextTrack)?,
-    Command::Previous => send_request(requests::PreviousTrack { soft: true })?,
+    Command::Next => send_request(requests::GoToNextTrack)?,
+    Command::Previous => send_request(requests::GoToPreviousTrack { soft: true })?,
 
     Command::Loop { loop_mode } => {
       if let Some(loop_mode) = loop_mode {
@@ -90,7 +90,14 @@ pub fn handle_command(command: Cli) -> Result<(), crate::Error> {
       }
     }
 
-    Command::Seek { seek_position } => send_request(requests::Seek(seek_position))?,
+    Command::Seek { seek_position } => match SeekOffset::try_from(seek_position) {
+      Ok(seek_offset) => send_request(requests::SeekCurrent(seek_offset))?,
+      Err(position) => {
+        if let Some(track_id) = send_request(requests::QueryCurrentTrackId)? {
+          send_request(requests::SeekTo(track_id, position))?;
+        }
+      }
+    },
 
     Command::Queue { command, tracks } => {
       if let Some(command) = command {
@@ -98,8 +105,8 @@ pub fn handle_command(command: Cli) -> Result<(), crate::Error> {
       } else if let Some(tracks) = tracks {
         handle_queue_command(QueueCommand::Add { tracks })?
       } else {
-        let track_list = send_request(requests::QueryTrackList)?;
-        print_track_list(track_list);
+        let track_queue = send_request(requests::QueryQueueTracks)?;
+        print_queue(track_queue);
       }
     }
   };

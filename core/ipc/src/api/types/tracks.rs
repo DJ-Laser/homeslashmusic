@@ -47,5 +47,6 @@ pub type TrackId = usize;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TrackInstance {
   pub id: TrackId,
+  #[serde(flatten)]
   pub metadata: TrackMetadata,
 }
