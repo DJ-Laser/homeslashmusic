@@ -26,14 +26,12 @@ pub enum MprisServerError {
   EventChannelClosed,
 }
 
+pub const BUS_NAME_SUFFIX: &str = "dev.djlaser.HomeSlashMusic";
+
 pub struct MprisPlugin<Tx> {
   server: Server<MprisImpl<Tx>>,
 
   quit_rx: Receiver<()>,
-}
-
-impl<Tx> MprisPlugin<Tx> {
-  pub const BUS_NAME: &str = "dev.djlaser.HomeSlashMusic";
 }
 
 impl<'ex, Tx: RequestSender + Send + Sync + 'static> Plugin<'ex, Tx> for MprisPlugin<Tx> {
@@ -42,7 +40,8 @@ impl<'ex, Tx: RequestSender + Send + Sync + 'static> Plugin<'ex, Tx> for MprisPl
   async fn init(request_tx: Tx, _ex: Arc<Executor<'ex>>) -> Result<Self, Self::Error> {
     let (quit_tx, quit_rx) = channel::bounded(1);
 
-    let server = Server::new(Self::BUS_NAME, MprisImpl::new(request_tx, quit_tx)).await?;
+    let server =
+      Server::new_with_track_list(BUS_NAME_SUFFIX, MprisImpl::new(request_tx, quit_tx)).await?;
 
     Ok(Self { server, quit_rx })
   }

@@ -1,10 +1,12 @@
-use hsm_ipc::{InsertPosition, Request, SeekPosition, requests};
+use hsm_ipc::{InsertPosition, Request, SeekOffset, requests};
 use hsm_plugin::RequestSender;
 use mpris_server::{
-  PlayerInterface, RootInterface,
+  PlayerInterface, RootInterface, TrackListInterface,
   zbus::{self, fdo},
 };
 use smol::channel::{self, Sender};
+
+use crate::conversions::{from_dbus_track_id, from_real_dbus_track_id, into_dbus_track_id};
 
 use super::conversions::{
   as_dbus_time, as_loop_status, as_playback_status, decode_file_url, from_dbus_time,
@@ -48,6 +50,21 @@ impl<Tx: RequestSender + Send + Sync> MprisImpl<Tx> {
       .await
       .map_err(Self::channel_closed_error)
   }
+
+  async fn load_uri(&self, uri: String, position: InsertPosition) -> fdo::Result<()> {
+    let Some(file_path) = decode_file_url(uri) else {
+      return Self::unsupported("Unsupported uri type");
+    };
+
+    let errors = self
+      .try_send(requests::LoadTracks(position, vec![file_path]))
+      .await?;
+
+    match errors.first() {
+      Some((_path, error)) => Err(fdo::Error::Failed(error.to_string())),
+      None => Ok(()),
+    }
+  }
 }
 
 impl<Tx: RequestSender + Send + Sync> RootInterface for MprisImpl<Tx> {
@@ -86,7 +103,7 @@ impl<Tx: RequestSender + Send + Sync> RootInterface for MprisImpl<Tx> {
   }
 
   async fn has_track_list(&self) -> fdo::Result<bool> {
-    Ok(false)
+    Ok(true)
   }
 
   async fn identity(&self) -> fdo::Result<String> {
@@ -113,11 +130,13 @@ impl<Tx: RequestSender + Send + Sync> RootInterface for MprisImpl<Tx> {
 
 impl<Tx: RequestSender + Send + Sync> PlayerInterface for MprisImpl<Tx> {
   async fn next(&self) -> fdo::Result<()> {
-    self.try_send(requests::NextTrack).await
+    self.try_send(requests::GoToNextTrack).await
   }
 
   async fn previous(&self) -> fdo::Result<()> {
-    self.try_send(requests::PreviousTrack { soft: true }).await
+    self
+      .try_send(requests::GoToPreviousTrack { soft: true })
+      .await
   }
 
   async fn pause(&self) -> fdo::Result<()> {
@@ -142,40 +161,34 @@ impl<Tx: RequestSender + Send + Sync> PlayerInterface for MprisImpl<Tx> {
     }
 
     let seek_offset = if offset.is_positive() {
-      SeekPosition::Forward(from_dbus_time(offset))
+      SeekOffset::Forward(from_dbus_time(offset))
     } else {
-      SeekPosition::Backward(from_dbus_time(offset))
+      SeekOffset::Backward(from_dbus_time(offset))
     };
 
-    self.try_send(requests::Seek(seek_offset)).await
+    self.try_send(requests::SeekCurrent(seek_offset)).await
   }
 
   async fn set_position(
     &self,
-    _track_id: mpris_server::TrackId,
+    track_id: mpris_server::TrackId,
     position: mpris_server::Time,
   ) -> fdo::Result<()> {
     if position.is_negative() {
       return Ok(());
     }
 
-    let seek_position = SeekPosition::To(from_dbus_time(position));
-    self.try_send(requests::Seek(seek_position)).await
+    let track_id = from_real_dbus_track_id(track_id)?;
+
+    self
+      .try_send(requests::SeekTo(track_id, from_dbus_time(position)))
+      .await?;
+
+    Ok(())
   }
 
   async fn open_uri(&self, uri: String) -> fdo::Result<()> {
-    if let Some(file_path) = decode_file_url(uri) {
-      let errors = self
-        .try_send(requests::LoadTracks(InsertPosition::End, vec![file_path]))
-        .await?;
-
-      match errors.first() {
-        Some((_path, error)) => Err(fdo::Error::Failed(error.to_string())),
-        None => Ok(()),
-      }
-    } else {
-      Self::unsupported("Unsupported uri type")
-    }
+    self.load_uri(uri, InsertPosition::End).await
   }
 
   async fn playback_status(&self) -> fdo::Result<mpris_server::PlaybackStatus> {
@@ -222,7 +235,7 @@ impl<Tx: RequestSender + Send + Sync> PlayerInterface for MprisImpl<Tx> {
 
   async fn metadata(&self) -> fdo::Result<mpris_server::Metadata> {
     let metadata = match self.try_send(requests::QueryCurrentTrack).await? {
-      Some(track) => generate_metadata(track.metadata),
+      Some(track) => generate_metadata(track),
       None => mpris_server::Metadata::builder()
         .trackid(mpris_server::TrackId::NO_TRACK)
         .build(),
@@ -281,6 +294,61 @@ impl<Tx: RequestSender + Send + Sync> PlayerInterface for MprisImpl<Tx> {
   }
 
   async fn can_control(&self) -> fdo::Result<bool> {
+    Ok(true)
+  }
+}
+
+impl<Tx: RequestSender + Send + Sync> TrackListInterface for MprisImpl<Tx> {
+  async fn get_tracks_metadata(
+    &self,
+    track_ids: Vec<mpris_server::TrackId>,
+  ) -> fdo::Result<Vec<mpris_server::Metadata>> {
+    todo!()
+  }
+
+  async fn add_track(
+    &self,
+    uri: mpris_server::Uri,
+    after_track: mpris_server::TrackId,
+    set_as_current: bool,
+  ) -> fdo::Result<()> {
+    let after_track = from_dbus_track_id(after_track)?;
+    let insert_position = match after_track {
+      Some(track_id) => InsertPosition::After(track_id),
+      None => InsertPosition::Start,
+    };
+
+    self.load_uri(uri, insert_position).await?;
+    if set_as_current {
+      todo!()
+    }
+
+    Ok(())
+  }
+
+  async fn remove_track(&self, track_id: mpris_server::TrackId) -> fdo::Result<()> {
+    todo!()
+  }
+
+  async fn go_to(&self, track_id: mpris_server::TrackId) -> fdo::Result<()> {
+    let track_id = from_real_dbus_track_id(track_id)?;
+    self.try_send(requests::GoToTrack(track_id)).await?;
+
+    Ok(())
+  }
+
+  async fn tracks(&self) -> fdo::Result<Vec<mpris_server::TrackId>> {
+    let track_ids = self.try_send(requests::QueryQueueTrackIds).await?;
+
+    let track_ids = track_ids
+      .into_iter()
+      .map(|track_id| into_dbus_track_id(track_id))
+      .collect();
+
+    Ok(track_ids)
+  }
+
+  async fn can_edit_tracks(&self) -> fdo::Result<bool> {
     Ok(true)
   }
 }
