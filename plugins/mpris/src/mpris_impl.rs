@@ -1,4 +1,4 @@
-use hsm_ipc::{InsertPosition, Request, SeekOffset, requests};
+use hsm_ipc::{InsertPosition, Request, SeekOffset, TrackId, requests};
 use hsm_plugin::RequestSender;
 use mpris_server::{
   PlayerInterface, RootInterface, TrackListInterface,
@@ -6,7 +6,9 @@ use mpris_server::{
 };
 use smol::channel::{self, Sender};
 
-use crate::conversions::{from_dbus_track_id, from_real_dbus_track_id, into_dbus_track_id};
+use crate::conversions::{
+  from_dbus_track_id, from_real_dbus_track_id, generate_empty_metadata, into_dbus_track_id,
+};
 
 use super::conversions::{
   as_dbus_time, as_loop_status, as_playback_status, decode_file_url, from_dbus_time,
@@ -51,13 +53,22 @@ impl<Tx: RequestSender + Send + Sync> MprisImpl<Tx> {
       .map_err(Self::channel_closed_error)
   }
 
-  async fn load_uri(&self, uri: String, position: InsertPosition) -> fdo::Result<()> {
+  async fn load_uri(
+    &self,
+    uri: String,
+    position: InsertPosition,
+    set_as_current: bool,
+  ) -> fdo::Result<()> {
     let Some(file_path) = decode_file_url(uri) else {
       return Self::unsupported("Unsupported uri type");
     };
 
     let errors = self
-      .try_send(requests::LoadTracks(position, vec![file_path]))
+      .try_send(requests::LoadTracks {
+        position,
+        paths: vec![file_path],
+        set_as_current,
+      })
       .await?;
 
     match errors.first() {
@@ -188,7 +199,7 @@ impl<Tx: RequestSender + Send + Sync> PlayerInterface for MprisImpl<Tx> {
   }
 
   async fn open_uri(&self, uri: String) -> fdo::Result<()> {
-    self.load_uri(uri, InsertPosition::End).await
+    self.load_uri(uri, InsertPosition::End, false).await
   }
 
   async fn playback_status(&self) -> fdo::Result<mpris_server::PlaybackStatus> {
@@ -303,7 +314,27 @@ impl<Tx: RequestSender + Send + Sync> TrackListInterface for MprisImpl<Tx> {
     &self,
     track_ids: Vec<mpris_server::TrackId>,
   ) -> fdo::Result<Vec<mpris_server::Metadata>> {
-    todo!()
+    let track_ids = track_ids
+      .into_iter()
+      .map(|track_id| from_real_dbus_track_id(track_id))
+      .collect::<Result<Vec<TrackId>, _>>()?;
+
+    let mut tracks = self.try_send(requests::QueryQueueTracks).await?;
+
+    let metadata_list = track_ids
+      .into_iter()
+      .map(
+        |track_id| match tracks.iter().position(|track| track.id == track_id) {
+          Some(index) => {
+            let track = tracks.swap_remove(index);
+            generate_metadata(track)
+          }
+          None => generate_empty_metadata(track_id),
+        },
+      )
+      .collect();
+
+    Ok(metadata_list)
   }
 
   async fn add_track(
@@ -318,10 +349,7 @@ impl<Tx: RequestSender + Send + Sync> TrackListInterface for MprisImpl<Tx> {
       None => InsertPosition::Start,
     };
 
-    self.load_uri(uri, insert_position).await?;
-    if set_as_current {
-      todo!()
-    }
+    self.load_uri(uri, insert_position, set_as_current).await?;
 
     Ok(())
   }

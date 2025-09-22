@@ -503,12 +503,13 @@ impl Player {
     &self,
     position: InsertPosition,
     tracks: &[Arc<TrackMetadata>],
+    set_as_current: bool,
   ) -> Result<(), PlayerError> {
     let current_index = self.current_track_index.load(Ordering::Acquire);
 
     let new_current_index = self
       .tracks
-      .insert_tracks(current_index, position, tracks)
+      .insert_tracks(current_index, position, tracks, set_as_current)
       .await?;
 
     self
@@ -516,7 +517,7 @@ impl Player {
       .store(new_current_index, Ordering::Release);
 
     // If the track list was replaced, a new song must begin playing
-    if matches!(position, InsertPosition::Replace) && !self.is_stopped() {
+    if set_as_current && !self.is_stopped() {
       self.queue_current_track(false).await?;
     }
 

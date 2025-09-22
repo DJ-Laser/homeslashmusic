@@ -247,12 +247,9 @@ impl TrackList {
     current_index: usize,
     position: InsertPosition,
     tracks: &[Arc<TrackMetadata>],
+    set_as_current: bool,
   ) -> Result<usize, PlayerError> {
     let mut inner = self.inner.lock().await;
-
-    if matches!(position, InsertPosition::Replace) {
-      inner.clear();
-    }
 
     let track_list_started_empty = inner.len() == 0;
 
@@ -279,7 +276,6 @@ impl TrackList {
       }
       InsertPosition::Start => 0,
       InsertPosition::End => inner.len(),
-      InsertPosition::Replace => 0,
     };
 
     let shuffle_indicies: Vec<usize> = inner.insert_tracks(insert_index, tracks).collect();
@@ -307,6 +303,10 @@ impl TrackList {
     }
 
     self.track_list_len.store(inner.len(), Ordering::Release);
+
+    if set_as_current {
+      new_current_index = insert_index;
+    }
 
     if !track_list_started_empty {
       Ok(new_current_index)

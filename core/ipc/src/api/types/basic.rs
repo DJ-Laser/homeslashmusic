@@ -63,6 +63,4 @@ pub enum InsertPosition {
   Next,
   Start,
   End,
-  /// Clear the current track list before inserting
-  Replace,
 }

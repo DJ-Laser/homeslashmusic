@@ -138,5 +138,10 @@ requests! {
   QueryQueueTrackIds() -> Vec<TrackId>;
 
   ClearTracks() -> ();
-  LoadTracks(InsertPosition, Vec<PathBuf>) -> Vec<(PathBuf, String)>;
+  LoadTracks {
+    pub position: InsertPosition,
+    pub paths: Vec<PathBuf>,
+    /// Set the first track inserted as the current one
+    pub set_as_current: bool,
+  } -> Vec<(PathBuf, String)>;
 }

@@ -4,13 +4,21 @@ use crate::cli::{Cli, Command, QueueCommand};
 use crate::ipc::send_request;
 use hsm_ipc::{InsertPosition, LoopMode, SeekOffset, TrackInstance, requests};
 
-fn try_load_tracks(position: InsertPosition, paths: &[PathBuf]) -> Result<(), crate::Error> {
+fn try_load_tracks(
+  position: InsertPosition,
+  paths: &[PathBuf],
+  set_as_current: bool,
+) -> Result<(), crate::Error> {
   let mut absolute_paths = Vec::new();
   for path in paths {
     absolute_paths.push(path::absolute(path).map_err(crate::Error::GetCurrentDirFailed)?);
   }
 
-  let errors = send_request(requests::LoadTracks(position, absolute_paths))?;
+  let errors = send_request(requests::LoadTracks {
+    position,
+    paths: absolute_paths,
+    set_as_current,
+  })?;
 
   for (path, error) in errors {
     eprintln!("Failed to load track {path:?}: {error}")
@@ -22,9 +30,12 @@ fn try_load_tracks(position: InsertPosition, paths: &[PathBuf]) -> Result<(), cr
 fn handle_queue_command(command: QueueCommand) -> Result<(), crate::Error> {
   match command {
     QueueCommand::Clear => send_request(requests::ClearTracks)?,
-    QueueCommand::Replace { tracks } => try_load_tracks(InsertPosition::Replace, &tracks.paths)?,
-    QueueCommand::Add { tracks } => try_load_tracks(InsertPosition::End, &tracks.paths)?,
-    QueueCommand::Next { tracks } => try_load_tracks(InsertPosition::Next, &tracks.paths)?,
+    QueueCommand::Replace { tracks } => {
+      send_request(requests::ClearTracks)?;
+      try_load_tracks(InsertPosition::Start, &tracks.paths, false)?
+    }
+    QueueCommand::Add { tracks } => try_load_tracks(InsertPosition::End, &tracks.paths, false)?,
+    QueueCommand::Next { tracks } => try_load_tracks(InsertPosition::Next, &tracks.paths, false)?,
   };
 
   Ok(())
@@ -46,7 +57,8 @@ pub fn handle_command(command: Cli) -> Result<(), crate::Error> {
   match command.command {
     Command::Play { tracks } => {
       if let Some(tracks) = tracks {
-        try_load_tracks(InsertPosition::Replace, &tracks.paths)?;
+        send_request(requests::ClearTracks)?;
+        try_load_tracks(InsertPosition::Start, &tracks.paths, false)?;
       }
 
       send_request(requests::Play)?

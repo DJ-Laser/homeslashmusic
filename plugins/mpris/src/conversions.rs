@@ -77,6 +77,11 @@ pub fn from_real_dbus_track_id(track_id: mpris_server::TrackId) -> fdo::Result<T
   }
 }
 
+pub fn generate_empty_metadata(track_id: TrackId) -> mpris_server::Metadata {
+  let track_id = into_dbus_track_id(track_id);
+  mpris_server::Metadata::builder().trackid(track_id).build()
+}
+
 pub fn generate_metadata(track: TrackInstance) -> mpris_server::Metadata {
   let track_id = into_dbus_track_id(track.id);
   let track = track.metadata;

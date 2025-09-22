@@ -190,7 +190,11 @@ impl RequestHandler for AudioServer {
 
   async fn handle_load_tracks(
     &self,
-    requests::LoadTracks(position, paths): requests::LoadTracks,
+    requests::LoadTracks {
+      position,
+      paths,
+      set_as_current,
+    }: requests::LoadTracks,
   ) -> Result<Vec<(PathBuf, String)>, Self::Error> {
     println!("Loading tracks: {:?}", paths);
     let (tracks, errors) = self.track_cache.get_or_load_tracks(paths).await;
@@ -203,7 +207,10 @@ impl RequestHandler for AudioServer {
       println!("Loaded track {:?}", track.file_path);
     }
 
-    (self.player.insert_tracks(position, &tracks).await)?;
+    (self
+      .player
+      .insert_tracks(position, &tracks, set_as_current)
+      .await)?;
 
     Ok(
       errors
