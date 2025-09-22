@@ -25,11 +25,9 @@ impl TrackDecoder {
       decoder = decoder.with_hint(hint);
     }
 
-    println!("qa");
     let decoder = decoder
       .build()
       .map_err(LoadTrackError::CreateTrackDecoderFailed)?;
-    println!("qa2");
 
     Ok(TrackDecoder { decoder })
   }
