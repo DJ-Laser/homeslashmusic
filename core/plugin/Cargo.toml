@@ -7,3 +7,6 @@ edition.workspace = true
 hsm-ipc.workspace = true
 
 smol.workspace = true
+
+[lints]
+workspace = true

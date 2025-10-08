@@ -11,3 +11,6 @@ smol.workspace = true
 thiserror.workspace = true
 urlencoding.workspace = true
 mpris-server = "0.9.0"
+
+[lints]
+workspace = true

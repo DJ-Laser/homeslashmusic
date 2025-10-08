@@ -26,3 +26,6 @@ thiserror.workspace = true
 urlencoding.workspace = true
 dashmap.workspace = true
 rand.workspace = true
+
+[lints]
+workspace = true
