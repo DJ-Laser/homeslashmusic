@@ -40,5 +40,5 @@ pub enum LoadTrackError {
 pub async fn get_cannonical_track_path(path: &Path) -> Result<PathBuf, LoadTrackError> {
   fs::canonicalize(&path)
     .await
-    .map_err(|error| LoadTrackError::CannonicalizeFailed(error))
+    .map_err(LoadTrackError::CannonicalizeFailed)
 }

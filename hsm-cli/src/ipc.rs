@@ -36,5 +36,5 @@ pub fn send_request<R: Request>(request: R) -> Result<R::Response, crate::Error>
 
   let reply = deserialize_reply::<R>(&reply_data).map_err(crate::Error::Deserialize)?;
 
-  reply.map_err(|error| Error::Server(error))
+  reply.map_err(Error::Server)
 }

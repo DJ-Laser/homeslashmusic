@@ -50,7 +50,7 @@ impl TrackCache {
       return Ok(track);
     };
 
-    return Ok(track);
+    Ok(track)
   }
 
   /// Sorts by title, then track number, then album
@@ -71,7 +71,7 @@ impl TrackCache {
         .unwrap_or("".into())
     }
 
-    tracks.sort_by_key(|track| get_track_title(track));
+    tracks.sort_by_key(get_track_title);
     tracks.sort_by_key(|track| track.track_number);
     tracks.sort_by(|track_a, track_b| track_a.album.cmp(&track_b.album));
   }

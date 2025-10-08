@@ -50,7 +50,7 @@ impl RequestHandler for AudioServer {
     _request: requests::QueryCurrentTrack,
   ) -> Result<Option<TrackInstance>, Self::Error> {
     let current_track = self.player.current_track().await;
-    let current_track = current_track.map(|track| track.into_owned_instance());
+    let current_track = current_track.map(|track| track.clone_owned_instance());
 
     Ok(current_track)
   }
@@ -168,7 +168,7 @@ impl RequestHandler for AudioServer {
     let tracks = self.player.get_tracks().await;
     let tracks = tracks
       .into_iter()
-      .map(|track| track.into_owned_instance())
+      .map(|track| track.clone_owned_instance())
       .collect();
 
     Ok(tracks)
@@ -196,7 +196,7 @@ impl RequestHandler for AudioServer {
       set_as_current,
     }: requests::LoadTracks,
   ) -> Result<Vec<(PathBuf, String)>, Self::Error> {
-    println!("Loading tracks: {:?}", paths);
+    println!("Loading tracks: {paths:?}");
     let (tracks, errors) = self.track_cache.get_or_load_tracks(paths).await;
 
     for (path, error) in errors.iter() {

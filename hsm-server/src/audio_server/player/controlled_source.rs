@@ -25,10 +25,7 @@ impl SourceEvent {
   /// If this event indicates that the soutrce has ended.
   /// Used to manage the player's internal source count
   pub fn indicates_end(&self) -> bool {
-    match self {
-      Self::Finished | Self::LoopError(_) => true,
-      _ => false,
-    }
+    matches!(self, Self::Finished | Self::LoopError(_))
   }
 }
 

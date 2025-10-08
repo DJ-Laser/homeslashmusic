@@ -22,11 +22,11 @@ impl Debug for SourceQueueState {
 
 impl SourceQueueState {
   pub fn is_queued(&self) -> bool {
-    return matches!(self, Self::Queued(_));
+    matches!(self, Self::Queued(_))
   }
 
   pub fn is_playing(&self) -> bool {
-    return !matches!(self, Self::None);
+    !matches!(self, Self::None)
   }
 
   pub fn invalidate(&mut self) {

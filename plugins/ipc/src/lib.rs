@@ -85,7 +85,7 @@ impl<'ex, Tx: RequestSender + Send + Sync + Clone + 'ex> Plugin<'ex, Tx> for Ipc
           };
 
           if let Err(error) = res {
-            eprintln!("failed to connect to ipc client: {}", error);
+            eprintln!("failed to connect to ipc client: {error}");
           }
         })
         .detach();
@@ -121,7 +121,7 @@ impl<Tx: RequestSender> StreamHandler<Tx> {
     let reply_data = self.request_tx.send_json(request_data).await;
 
     let mut stream = stream_reader.into_inner();
-    stream.write_all(&reply_data.as_bytes()).await?;
+    stream.write_all(reply_data.as_bytes()).await?;
 
     Ok(())
   }

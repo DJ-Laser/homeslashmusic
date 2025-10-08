@@ -60,7 +60,7 @@ fn add_tag_to_metadata(metadata: &mut TrackMetadata, tag: &Tag) {
       if let Value::UnsignedInt(track_number) = tag.value {
         metadata.track_number = Some(track_number as usize);
       } else if let Value::String(track_number) = &tag.value {
-        if let Some(track_number) = track_number.parse().ok() {
+        if let Ok(track_number) = track_number.parse() {
           metadata.track_number = Some(track_number);
         }
       }

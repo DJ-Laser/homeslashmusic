@@ -316,7 +316,7 @@ impl<Tx: RequestSender + Send + Sync> TrackListInterface for MprisImpl<Tx> {
   ) -> fdo::Result<Vec<mpris_server::Metadata>> {
     let track_ids = track_ids
       .into_iter()
-      .map(|track_id| from_real_dbus_track_id(track_id))
+      .map(from_real_dbus_track_id)
       .collect::<Result<Vec<TrackId>, _>>()?;
 
     let mut tracks = self.try_send(requests::QueryQueueTracks).await?;
@@ -368,10 +368,7 @@ impl<Tx: RequestSender + Send + Sync> TrackListInterface for MprisImpl<Tx> {
   async fn tracks(&self) -> fdo::Result<Vec<mpris_server::TrackId>> {
     let track_ids = self.try_send(requests::QueryQueueTrackIds).await?;
 
-    let track_ids = track_ids
-      .into_iter()
-      .map(|track_id| into_dbus_track_id(track_id))
-      .collect();
+    let track_ids = track_ids.into_iter().map(into_dbus_track_id).collect();
 
     Ok(track_ids)
   }

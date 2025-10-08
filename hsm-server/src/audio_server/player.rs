@@ -80,11 +80,7 @@ pub enum PlayerError {
 
 impl PlayerError {
   pub fn is_recoverable(&self) -> bool {
-    match self {
-      Self::LoadTrack(_) => true,
-      Self::SeekFailed(_) => true,
-      _ => false,
-    }
+    !matches!(self, Self::SourceChannelClosed | Self::EventChannelClosed)
   }
 }
 
@@ -532,20 +528,18 @@ impl Player {
         .await
         .map_err(|_| PlayerError::SourceChannelClosed)?;
 
-      if event.indicates_end() {
-        if !matches!(event, SourceEvent::Skipped) {
-          if let Err(error) = self.go_to_next_track().await {
-            if error.is_recoverable() {
-              eprintln!("{error}");
-            } else {
-              return Err(error);
-            }
+      if event.indicates_end() && !matches!(event, SourceEvent::Skipped) {
+        if let Err(error) = self.go_to_next_track().await {
+          if error.is_recoverable() {
+            eprintln!("{error}");
+          } else {
+            return Err(error);
           }
         }
       }
 
       match event {
-        SourceEvent::LoopError(error) => eprintln!("Error looping source: {}", error),
+        SourceEvent::LoopError(error) => eprintln!("Error looping source: {error}"),
         SourceEvent::Seeked(position) => self.emit(Event::Seeked(position))?,
         _ => (),
       }

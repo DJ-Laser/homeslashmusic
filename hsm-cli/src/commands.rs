@@ -45,8 +45,6 @@ fn print_queue(tracks: Vec<TrackInstance>) {
   for TrackInstance { metadata, .. } in tracks {
     let title = metadata
       .title
-      .as_ref()
-      .map(|title| title.clone())
       .unwrap_or_else(|| metadata.file_path.to_string_lossy().into_owned());
 
     println!("| {title}")

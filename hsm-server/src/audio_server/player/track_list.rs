@@ -20,7 +20,7 @@ pub struct ArcTrackInstance {
 }
 
 impl ArcTrackInstance {
-  pub fn into_owned_instance(&self) -> TrackInstance {
+  pub fn clone_owned_instance(&self) -> TrackInstance {
     TrackInstance {
       id: self.id,
       metadata: TrackMetadata::clone(&self.metadata),
@@ -98,7 +98,7 @@ impl TrackListInner {
   fn shuffle_tracks(&mut self, current_index: usize, rng: &mut impl Rng) -> usize {
     debug_assert_eq!(self.track_list.len(), self.shuffled_track_indicies.len());
 
-    if self.track_list.len() == 0 {
+    if self.track_list.is_empty() {
       return 0;
     }
 

@@ -82,12 +82,12 @@ pub enum LoopMode {
   Playlist,
 }
 
-impl Into<hsm_ipc::LoopMode> for LoopMode {
-  fn into(self) -> hsm_ipc::LoopMode {
-    match self {
-      Self::Off => hsm_ipc::LoopMode::None,
-      Self::Track => hsm_ipc::LoopMode::Track,
-      Self::Playlist => hsm_ipc::LoopMode::Playlist,
+impl From<LoopMode> for hsm_ipc::LoopMode {
+  fn from(val: LoopMode) -> Self {
+    match val {
+      LoopMode::Off => hsm_ipc::LoopMode::None,
+      LoopMode::Track => hsm_ipc::LoopMode::Track,
+      LoopMode::Playlist => hsm_ipc::LoopMode::Playlist,
     }
   }
 }
@@ -98,11 +98,11 @@ pub enum ShuffleMode {
   On,
 }
 
-impl Into<bool> for ShuffleMode {
-  fn into(self) -> bool {
-    match self {
-      Self::Off => false,
-      Self::On => true,
+impl From<ShuffleMode> for bool {
+  fn from(val: ShuffleMode) -> Self {
+    match val {
+      ShuffleMode::Off => false,
+      ShuffleMode::On => true,
     }
   }
 }

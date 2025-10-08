@@ -121,12 +121,9 @@ pub fn generate_metadata(track: TrackInstance) -> mpris_server::Metadata {
 pub fn encode_file_url(path: &Path) -> String {
   let mut file_url = "file://".to_owned();
   for component in path.components() {
-    match component {
-      Component::Normal(os_str) => {
-        file_url.push('/');
-        file_url.push_str(&urlencoding::encode_binary(os_str.as_bytes()));
-      }
-      _ => (),
+    if let Component::Normal(os_str) = component {
+      file_url.push('/');
+      file_url.push_str(&urlencoding::encode_binary(os_str.as_bytes()));
     }
   }
 
