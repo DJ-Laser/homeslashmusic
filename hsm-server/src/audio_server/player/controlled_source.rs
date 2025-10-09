@@ -29,14 +29,15 @@ impl SourceEvent {
   }
 }
 
-type WrappedSourceInner<S> = ControlledSource<Pausable<Amplify<TrackPosition<S>>>>;
+type ControlledSourceInner<S> = Pausable<Amplify<TrackPosition<S>>>;
 
 pub const SOURCE_UPDATE_INTERVAL: Duration = Duration::from_millis(5);
 
-pub struct ControlledSource<I> {
-  input: I,
+struct ControlledSource<I> {
+  input: ControlledSourceInner<I>,
   controls: Arc<Controls>,
   source_tx: Sender<SourceEvent>,
+
   should_skip: bool,
 }
 
@@ -44,17 +45,52 @@ impl<I> ControlledSource<I>
 where
   I: Source,
 {
-  #[inline]
-  pub fn with_controls(
-    &mut self,
-    f: impl FnOnce(&mut I, &Arc<Controls>, &Sender<SourceEvent>, &mut bool),
-  ) {
-    f(
-      &mut self.input,
-      &self.controls,
-      &self.source_tx,
-      &mut self.should_skip,
-    )
+  pub fn new(input: I, controls: Arc<Controls>, source_tx: Sender<SourceEvent>) -> Self {
+    Self {
+      input: input.track_position().amplify(1.0).pausable(false),
+      controls,
+      source_tx,
+
+      should_skip: false,
+    }
+  }
+
+  fn update_control_state(&mut self) {
+    let to_skip = self.controls.to_skip.load(Ordering::Acquire);
+    if to_skip > 0 {
+      self.should_skip = true;
+      self.controls.to_skip.fetch_sub(1, Ordering::Release);
+      return;
+    }
+
+    let pausable = &mut self.input;
+    pausable.set_paused(!matches!(
+      self.controls.playback_state.load(Ordering::Relaxed),
+      PlaybackState::Playing
+    ));
+
+    let volume_controlled = pausable.inner_mut();
+    volume_controlled.set_factor(*self.controls.volume.lock_blocking());
+
+    let position_tracked = volume_controlled.inner_mut();
+    if let Some((seek_position, mut tx)) = self.controls.seek_position.lock_blocking().take() {
+      let current_position = position_tracked.get_pos();
+      let seek_position = match seek_position {
+        SeekPosition::Forward(duration) => current_position.saturating_add(duration),
+        SeekPosition::Backward(duration) => current_position.saturating_sub(duration),
+        SeekPosition::To(position) => position,
+      };
+
+      let _ = tx.send(
+        position_tracked
+          .try_seek(seek_position)
+          .map_err(|error| SeekError::SeekFailed(error.to_string())),
+      );
+
+      let _ = self.source_tx.try_send(SourceEvent::Seeked(seek_position));
+    }
+
+    *self.controls.position.lock_blocking() = position_tracked.get_pos();
   }
 
   fn clear_playing_source(&self) {
@@ -146,58 +182,13 @@ where
   }
 }
 
-fn control_wrapped_source<S: Source>(controlled: &mut WrappedSourceInner<S>) {
-  controlled.with_controls(|pauseable, controls, source_tx, should_skip| {
-    let to_skip = controls.to_skip.load(Ordering::Acquire);
-    if to_skip > 0 {
-      *should_skip = true;
-      controls.to_skip.fetch_sub(1, Ordering::Release);
-      return;
-    }
-
-    pauseable.set_paused(!matches!(
-      controls.playback_state.load(Ordering::Relaxed),
-      PlaybackState::Playing
-    ));
-
-    let volume_controlled = pauseable.inner_mut();
-    volume_controlled.set_factor(*controls.volume.lock_blocking());
-
-    let position_tracked = volume_controlled.inner_mut();
-    if let Some((seek_position, mut tx)) = controls.seek_position.lock_blocking().take() {
-      let current_position = position_tracked.get_pos();
-      let seek_position = match seek_position {
-        SeekPosition::Forward(duration) => current_position.saturating_add(duration),
-        SeekPosition::Backward(duration) => current_position.saturating_sub(duration),
-        SeekPosition::To(position) => position,
-      };
-
-      let _ = tx.send(
-        position_tracked
-          .try_seek(seek_position)
-          .map_err(|error| SeekError::SeekFailed(error.to_string())),
-      );
-
-      let _ = source_tx.try_send(SourceEvent::Seeked(seek_position));
-    }
-
-    *controls.position.lock_blocking() = position_tracked.get_pos();
-  });
-}
-
 pub fn wrap_source<S: Source>(
   source: S,
   controls: Arc<Controls>,
   source_tx: Sender<SourceEvent>,
 ) -> impl Source {
-  let wrapped = source.track_position().amplify(1.0).pausable(false);
-
-  let controlled = ControlledSource {
-    input: wrapped,
-    controls,
-    source_tx,
-    should_skip: false,
-  };
-
-  controlled.periodic_access(SOURCE_UPDATE_INTERVAL, control_wrapped_source)
+  ControlledSource::new(source, controls, source_tx).periodic_access(
+    SOURCE_UPDATE_INTERVAL,
+    ControlledSource::update_control_state,
+  )
 }
