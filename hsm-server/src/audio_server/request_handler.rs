@@ -20,7 +20,7 @@ impl RequestHandler for AudioServer {
     &self,
     _request: requests::QueryPlaybackState,
   ) -> Result<PlaybackState, Self::Error> {
-    Ok(self.player.playback_state())
+    Ok(self.player.playback_state().await)
   }
 
   async fn handle_play(&self, _request: requests::Play) -> Result<(), Self::Error> {
@@ -97,7 +97,7 @@ impl RequestHandler for AudioServer {
     &self,
     _request: requests::QueryLoopMode,
   ) -> Result<LoopMode, Self::Error> {
-    Ok(self.player.loop_mode())
+    Ok(self.player.loop_mode().await)
   }
 
   async fn handle_set_loop_mode(

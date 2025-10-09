@@ -1,8 +1,7 @@
 use std::{fmt::Debug, mem, sync::Arc, time::Duration};
 
 use rodio::{Sample, Source, source};
-
-use super::Controls;
+use smol::lock::{Mutex, MutexGuard};
 
 pub enum SourceQueueState {
   Queued(Box<dyn Source + Send>),
@@ -29,6 +28,8 @@ impl SourceQueueState {
     !matches!(self, Self::None)
   }
 
+  /// Invalidate any queued source
+  /// Used by Player to change the queued source
   pub fn invalidate(&mut self) {
     match self {
       Self::Queued(_) => *self = Self::Playing,
@@ -36,6 +37,8 @@ impl SourceQueueState {
     }
   }
 
+  /// Consume the queued source
+  /// Used by the audio thread to load a new source
   pub fn consume(&mut self) -> Option<Box<dyn Source + Send>> {
     match self {
       Self::Queued(_) => {
@@ -55,24 +58,41 @@ impl SourceQueueState {
   }
 }
 
+#[derive(Debug)]
+pub struct SourceQueue(Mutex<SourceQueueState>);
+
+impl SourceQueue {
+  pub fn new() -> Self {
+    Self(Mutex::new(SourceQueueState::None))
+  }
+
+  pub async fn lock(&self) -> MutexGuard<SourceQueueState> {
+    self.0.lock().await
+  }
+
+  fn lock_blocking(&self) -> MutexGuard<SourceQueueState> {
+    self.0.lock_blocking()
+  }
+}
+
 pub struct PlayerAudioOutput {
   current: Box<dyn Source + Send>,
-  controls: Arc<Controls>,
+  source_queue: Arc<SourceQueue>,
 }
 
 impl PlayerAudioOutput {
   const THRESHOLD: usize = 512;
 
-  pub(super) fn new(controls: Arc<Controls>) -> Self {
+  pub(super) fn new(source_queue: Arc<SourceQueue>) -> Self {
     Self {
       current: Box::new(source::Empty::new()) as Box<_>,
-      controls,
+      source_queue,
     }
   }
 
   fn load_next(&mut self) {
     self.current = {
-      let mut next = self.controls.source_queue.lock_blocking();
+      let mut next = self.source_queue.lock_blocking();
 
       match next.consume() {
         Some(next) => next,
