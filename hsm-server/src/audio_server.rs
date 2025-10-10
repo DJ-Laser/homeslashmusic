@@ -21,6 +21,9 @@ pub enum AudioServerError {
   MessageChannelClosed,
 
   #[error(transparent)]
+  StreamError(#[from] rodio::StreamError),
+
+  #[error(transparent)]
   PlayerError(#[from] player::PlayerError),
 
   #[error(transparent)]
@@ -47,17 +50,18 @@ pub struct AudioServer {
 }
 
 impl AudioServer {
-  pub fn init((request_data_rx, event_tx): (Receiver<RequestJson>, Sender<Event>)) -> Self {
-    let output_stream = rodio::OutputStreamBuilder::open_default_stream()
-      .expect("Could not open default audio stream");
+  pub fn init(
+    (request_data_rx, event_tx): (Receiver<RequestJson>, Sender<Event>),
+  ) -> Result<Self, AudioServerError> {
+    let output_stream = rodio::OutputStreamBuilder::open_default_stream()?;
 
-    Self {
+    Ok(Self {
       player: Player::connect_new(event_tx, output_stream.mixer()),
       track_cache: TrackCache::new(),
       output_stream,
 
       request_data_rx,
-    }
+    })
   }
 
   async fn handle_requests(&self) -> Result<(), AudioServerError> {

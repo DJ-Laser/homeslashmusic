@@ -44,7 +44,7 @@ const TRACK_ID_PREFIX: &str = "/dev/djlaser/HomeSlashMusic/queue/";
 
 pub fn into_dbus_track_id(track_id: TrackId) -> mpris_server::TrackId {
   let path = ObjectPath::try_from(format!("{TRACK_ID_PREFIX}{track_id}"))
-    .expect("object path should be valid");
+    .expect("TRACK_ID_PREFIX should always make valid object paths");
 
   mpris_server::TrackId::from(path)
 }

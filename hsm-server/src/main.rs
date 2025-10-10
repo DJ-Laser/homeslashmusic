@@ -29,7 +29,7 @@ async fn run_servers(ex: &Arc<Executor<'static>>) -> Result<(), MainError> {
   let mut signal_handler = SignalHandler::init()?;
 
   let (plugin_manager, audio_server_channels) = PluginManager::new(ex.clone());
-  let audio_server = AudioServer::init(audio_server_channels);
+  let audio_server = AudioServer::init(audio_server_channels)?;
 
   #[cfg(feature = "hsm-plugin-mpris")]
   let mpris_server: PluginRunner<MprisPlugin<_>> = plugin_manager.load_plugin().await?;
