@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 /// Loaded data for a single audio track, typically one per file
 /// Many `TrackId`s can be instances of the same `TrackMetadata`
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct TrackMetadata {
   /// The cannonical, non-symlink file path
   pub file_path: PathBuf,

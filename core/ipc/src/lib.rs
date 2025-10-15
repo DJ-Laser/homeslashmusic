@@ -4,22 +4,25 @@ use std::{env, sync::OnceLock};
 pub use api::*;
 mod api;
 
-fn version_string() -> String {
-  const MAJOR: &str = env!("CARGO_PKG_VERSION_MAJOR");
-  const MINOR: &str = env!("CARGO_PKG_VERSION_MINOR");
-  const PATCH: &str = env!("CARGO_PKG_VERSION_PATCH");
-
-  let commit = git_version!(fallback = "unknown commit");
-
-  if PATCH == "0" {
-    format!("{MAJOR}.{MINOR:0>2} ({commit})")
-  } else {
-    format!("{MAJOR}.{MINOR:0>2}.{PATCH} ({commit})")
-  }
-}
-
 pub fn version() -> Version {
-  Version(version_string())
+  const fn parse_version_num(number_string: &str) -> usize {
+    match usize::from_str_radix(number_string, 10) {
+      Ok(num) => num,
+      Err(_) => panic!("Failed to parse version number"),
+    }
+  }
+
+  const MAJOR: usize = parse_version_num(env!("CARGO_PKG_VERSION_MAJOR"));
+  const MINOR: usize = parse_version_num(env!("CARGO_PKG_VERSION_MINOR"));
+  const PATCH: usize = parse_version_num(env!("CARGO_PKG_VERSION_PATCH"));
+  const COMMIT: &str = git_version!(fallback = "unknown commit");
+
+  Version {
+    major: MAJOR,
+    minor: MINOR,
+    patch: PATCH,
+    commit: COMMIT.into(),
+  }
 }
 
 fn read_socket_path() -> String {
