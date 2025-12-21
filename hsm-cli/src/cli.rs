@@ -17,13 +17,16 @@ pub enum Command {
   },
 
   Pause,
+  #[command(alias = "p")]
   PlayPause,
   Stop,
 
+  #[command(alias = "n")]
   Next,
   #[command(alias = "prev")]
   Previous,
 
+  #[command(alias = "vol")]
   Volume {
     volume: Option<f32>,
   },
@@ -41,6 +44,7 @@ pub enum Command {
   },
 
   #[command(args_conflicts_with_subcommands = true)]
+  #[command(alias = "q")]
   Queue {
     #[command(subcommand)]
     command: Option<QueueCommand>,
