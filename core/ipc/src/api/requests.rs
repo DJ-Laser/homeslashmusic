@@ -1,8 +1,8 @@
 use std::{path::PathBuf, time::Duration};
 
 use crate::{
-  InsertPosition, LoopMode, PlaybackState, Request, SeekOffset, TrackId, TrackInstance, Version,
-  private::SealedRequest,
+    InsertPosition, LoopMode, PlaybackState, Request, SeekOffset, TrackId, TrackInstance, Version,
+    private::SealedRequest,
 };
 
 macro_rules! requests {
@@ -85,7 +85,7 @@ paste::paste! {
 }
 
 requests! {
-  /// Get the hsm_ipc::version() of the server.
+  /// Get the `hsm_ipc::version()` of the server.
   QueryVersion() -> Version;
 
   QueryPlaybackState() -> PlaybackState;
@@ -130,7 +130,7 @@ requests! {
   /// Seeks within the current track.
   SeekCurrent(SeekOffset) -> ();
   /// Seeks to a fixed position within the current song.
-  /// If the provided TrackId is not equal to the current track, the request is discarded as stale.
+  /// If the provided `TrackId` is not equal to the current track, the request is discarded as stale.
   /// Returns true the seek was successful, and false if it was discarded.
   SeekTo(TrackId, Duration) -> bool;
 

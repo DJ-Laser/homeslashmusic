@@ -1,30 +1,30 @@
-use std::{fmt::Debug, time::Duration};
-
-use serde::{Serialize, de::DeserializeOwned};
-
 pub mod client;
 pub mod requests;
 pub mod server;
 mod types;
 
+use std::{fmt::Debug, time::Duration};
+
+use serde::{Serialize, de::DeserializeOwned};
+
 pub use types::*;
 
 pub(crate) mod private {
-  use std::fmt::Debug;
+    use std::fmt::Debug;
 
-  use serde::{Serialize, de::DeserializeOwned};
+    use serde::{Serialize, de::DeserializeOwned};
 
-  use super::requests::private::QualifiedRequest;
+    use super::requests::private::QualifiedRequest;
 
-  pub trait SealedRequest:
-    Debug + Clone + Send + Sync + Serialize + DeserializeOwned + Into<QualifiedRequest>
-  {
-  }
+    pub trait SealedRequest:
+        Debug + Clone + Send + Sync + Serialize + DeserializeOwned + Into<QualifiedRequest>
+    {
+    }
 }
 
 /// Request sent to the hsm server
 pub trait Request: private::SealedRequest {
-  type Response: Debug + Clone + Serialize + DeserializeOwned;
+    type Response: Debug + Clone + Serialize + DeserializeOwned;
 }
 
 /// Reply from the hsm server
@@ -37,15 +37,15 @@ pub trait Request: private::SealedRequest {
 #[allow(type_alias_bounds)]
 pub type Reply<R>
 where
-  R: Request,
+    R: Request,
 = Result<<R as Request>::Response, String>;
 
 /// An event than can be sent from the serverasynchronously at any time.
 #[derive(Debug, Clone)]
 pub enum Event {
-  PlaybackStateChanged(PlaybackState),
-  LoopModeChanged(LoopMode),
-  ShuffleChanged(bool),
-  VolumeChanged(f32),
-  Seeked(Duration),
+    PlaybackStateChanged(PlaybackState),
+    LoopModeChanged(LoopMode),
+    ShuffleChanged(bool),
+    VolumeChanged(f32),
+    Seeked(Duration),
 }

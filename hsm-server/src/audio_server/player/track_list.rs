@@ -1,9 +1,9 @@
 use std::{
-  ops::Index,
-  sync::{
-    Arc,
-    atomic::{AtomicBool, AtomicUsize, Ordering},
-  },
+    ops::Index,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+    },
 };
 
 use hsm_ipc::{InsertPosition, TrackId, TrackInstance, TrackMetadata};
@@ -12,125 +12,123 @@ use smol::lock::Mutex;
 
 use super::PlayerError;
 
-/// A `LoadedTrack` with a track_id to uniquely identify it
+/// A `LoadedTrack` with a `track_id` to uniquely identify it
 #[derive(Debug, Clone)]
 pub struct ArcTrackInstance {
-  pub id: TrackId,
-  pub metadata: Arc<TrackMetadata>,
+    pub id: TrackId,
+    pub metadata: Arc<TrackMetadata>,
 }
 
 impl ArcTrackInstance {
-  pub fn clone_owned_instance(&self) -> TrackInstance {
-    TrackInstance {
-      id: self.id,
-      metadata: TrackMetadata::clone(&self.metadata),
+    pub fn clone_owned_instance(&self) -> TrackInstance {
+        TrackInstance {
+            id: self.id,
+            metadata: TrackMetadata::clone(&self.metadata),
+        }
     }
-  }
 }
 
 /// `track_list` and `shuffle_order` must always have the same `len()`
 #[derive(Debug)]
 struct TrackListInner {
-  track_list: Vec<ArcTrackInstance>,
-  shuffled_track_indicies: Vec<usize>,
-  latest_track_id: TrackId,
+    track_list: Vec<ArcTrackInstance>,
+    shuffled_track_indicies: Vec<usize>,
+    latest_track_id: TrackId,
 }
 
 impl TrackListInner {
-  pub fn new() -> Self {
-    Self {
-      track_list: Vec::new(),
-      shuffled_track_indicies: Vec::new(),
-      latest_track_id: 0,
-    }
-  }
-
-  pub fn clear(&mut self) {
-    debug_assert_eq!(self.track_list.len(), self.shuffled_track_indicies.len());
-
-    self.track_list.clear();
-    self.shuffled_track_indicies.clear();
-  }
-
-  pub fn len(&self) -> usize {
-    debug_assert_eq!(self.track_list.len(), self.shuffled_track_indicies.len());
-
-    self.track_list.len()
-  }
-
-  /// Inserts tracks into the `track_list`
-  /// Does not insert shuffle indicies, instead returns an iterator of shuffle indicies to insert
-  /// These indicies must be added into `shuffled_track_indicies`` before calling any other method
-  pub fn insert_tracks(
-    &mut self,
-    index: usize,
-    tracks: &[Arc<TrackMetadata>],
-  ) -> impl Iterator<Item = usize> {
-    debug_assert_eq!(self.track_list.len(), self.shuffled_track_indicies.len());
-
-    let track_instances = tracks.iter().map(|track| {
-      let track_instance = ArcTrackInstance {
-        metadata: track.clone(),
-        id: self.latest_track_id,
-      };
-
-      self.latest_track_id += 1;
-      track_instance
-    });
-
-    self.track_list.splice(index..index, track_instances);
-
-    // Update shuffle indicies to point to the updated track positions
-    for shuffle_index in self.shuffled_track_indicies.iter_mut() {
-      if *shuffle_index >= index {
-        *shuffle_index += tracks.len();
-      }
+    pub fn new() -> Self {
+        Self {
+            track_list: Vec::new(),
+            shuffled_track_indicies: Vec::new(),
+            latest_track_id: 0,
+        }
     }
 
-    // return shuffle indicies corresponding to the inserted tracks
-    index..index + tracks.len()
-  }
+    pub fn clear(&mut self) {
+        debug_assert_eq!(self.track_list.len(), self.shuffled_track_indicies.len());
 
-  /// Shuffles the `shuffled_track_indicies`
-  ///
-  /// Returns the new index of `current_index`
-  /// Currently `current_index` will always be moved to index 0
-  fn shuffle_tracks(&mut self, current_index: usize, rng: &mut impl Rng) -> usize {
-    debug_assert_eq!(self.track_list.len(), self.shuffled_track_indicies.len());
-
-    if self.track_list.is_empty() {
-      return 0;
+        self.track_list.clear();
+        self.shuffled_track_indicies.clear();
     }
 
-    let current_track = self.shuffled_track_indicies.remove(current_index);
-    self.shuffled_track_indicies.shuffle(rng);
+    pub fn len(&self) -> usize {
+        debug_assert_eq!(self.track_list.len(), self.shuffled_track_indicies.len());
 
-    let new_index = 0;
-    self
-      .shuffled_track_indicies
-      .insert(new_index, current_track);
+        self.track_list.len()
+    }
 
-    new_index
-  }
+    /// Inserts tracks into the `track_list`
+    /// Does not insert shuffle indicies, instead returns an iterator of shuffle indicies to insert
+    /// These indicies must be added into `shuffled_track_indicies` before calling any other method
+    pub fn insert_tracks(
+        &mut self,
+        index: usize,
+        tracks: &[Arc<TrackMetadata>],
+    ) -> impl Iterator<Item = usize> {
+        debug_assert_eq!(self.track_list.len(), self.shuffled_track_indicies.len());
 
-  fn order_tracks(&mut self) {
-    debug_assert_eq!(self.track_list.len(), self.shuffled_track_indicies.len());
+        let track_instances = tracks.iter().map(|track| {
+            let track_instance = ArcTrackInstance {
+                metadata: track.clone(),
+                id: self.latest_track_id,
+            };
 
-    self.shuffled_track_indicies.clear();
-    self
-      .shuffled_track_indicies
-      .extend(0..self.track_list.len());
-  }
+            self.latest_track_id += 1;
+            track_instance
+        });
+
+        self.track_list.splice(index..index, track_instances);
+
+        // Update shuffle indicies to point to the updated track positions
+        for shuffle_index in &mut self.shuffled_track_indicies {
+            if *shuffle_index >= index {
+                *shuffle_index += tracks.len();
+            }
+        }
+
+        // return shuffle indicies corresponding to the inserted tracks
+        index..index + tracks.len()
+    }
+
+    /// Shuffles the `shuffled_track_indicies`
+    ///
+    /// Returns the new index of `current_index`
+    /// Currently `current_index` will always be moved to index 0
+    fn shuffle_tracks(&mut self, current_index: usize, rng: &mut impl Rng) -> usize {
+        debug_assert_eq!(self.track_list.len(), self.shuffled_track_indicies.len());
+
+        if self.track_list.is_empty() {
+            return 0;
+        }
+
+        let current_track = self.shuffled_track_indicies.remove(current_index);
+        self.shuffled_track_indicies.shuffle(rng);
+
+        let new_index = 0;
+        self.shuffled_track_indicies
+            .insert(new_index, current_track);
+
+        new_index
+    }
+
+    fn order_tracks(&mut self) {
+        debug_assert_eq!(self.track_list.len(), self.shuffled_track_indicies.len());
+
+        self.shuffled_track_indicies.clear();
+        self.shuffled_track_indicies
+            .extend(0..self.track_list.len());
+    }
 }
 
 impl Index<usize> for TrackListInner {
-  type Output = ArcTrackInstance;
+    type Output = ArcTrackInstance;
 
-  fn index(&self, index: usize) -> &Self::Output {
-    debug_assert_eq!(self.track_list.len(), self.shuffled_track_indicies.len());
+    fn index(&self, index: usize) -> &Self::Output {
+        debug_assert_eq!(self.track_list.len(), self.shuffled_track_indicies.len());
 
-    &self.track_list[self.shuffled_track_indicies[index]]
-  }
+        &self.track_list[self.shuffled_track_indicies[index]]
+    }
 }
 
 /// Manages the track list and index.
@@ -138,186 +136,186 @@ impl Index<usize> for TrackListInner {
 /// To reduce the need for locking, relevant data is stored in atomics insteadd of locking the track list
 #[derive(Debug)]
 pub struct TrackList {
-  inner: Mutex<TrackListInner>,
-  track_list_len: AtomicUsize,
-  shuffle_enabled: AtomicBool,
+    inner: Mutex<TrackListInner>,
+    len: AtomicUsize,
+    shuffle_enabled: AtomicBool,
 }
 
 impl TrackList {
-  pub fn new() -> Self {
-    Self {
-      inner: Mutex::new(TrackListInner::new()),
-      track_list_len: AtomicUsize::new(0),
-      shuffle_enabled: AtomicBool::new(false),
-    }
-  }
-
-  pub fn len(&self) -> usize {
-    self.track_list_len.load(Ordering::Acquire)
-  }
-
-  pub async fn get_track_index(&self, track_id: TrackId) -> Option<usize> {
-    let inner = self.inner.lock().await;
-    for index in 0..inner.len() {
-      if inner[index].id == track_id {
-        return Some(index);
-      }
+    pub fn new() -> Self {
+        Self {
+            inner: Mutex::new(TrackListInner::new()),
+            len: AtomicUsize::new(0),
+            shuffle_enabled: AtomicBool::new(false),
+        }
     }
 
-    None
-  }
-
-  pub async fn get_track_at(&self, index: usize) -> Option<ArcTrackInstance> {
-    let num_tracks = self.track_list_len.load(Ordering::Acquire);
-
-    if index >= num_tracks {
-      return None;
+    pub fn len(&self) -> usize {
+        self.len.load(Ordering::Acquire)
     }
 
-    let inner = self.inner.lock().await;
-    Some(inner[index].clone())
-  }
+    pub async fn get_track_index(&self, track_id: TrackId) -> Option<usize> {
+        let inner = self.inner.lock().await;
+        for index in 0..inner.len() {
+            if inner[index].id == track_id {
+                return Some(index);
+            }
+        }
 
-  /// Returns `None` if the track list length is zero
-  pub async fn get_tracks_to_queue(
-    &self,
-    index: usize,
-  ) -> Option<(ArcTrackInstance, Option<ArcTrackInstance>)> {
-    let num_tracks = self.track_list_len.load(Ordering::Acquire);
-
-    if index >= num_tracks {
-      return None;
+        None
     }
 
-    let inner = self.inner.lock().await;
+    pub async fn get_track_at(&self, index: usize) -> Option<ArcTrackInstance> {
+        let num_tracks = self.len.load(Ordering::Acquire);
 
-    let current_track = inner[index].clone();
+        if index >= num_tracks {
+            return None;
+        }
 
-    let is_last_track = index == num_tracks - 1;
-    let next_track = if !is_last_track {
-      Some(inner[index + 1].clone())
-    } else {
-      None
-    };
-
-    Some((current_track, next_track))
-  }
-
-  pub fn shuffle_enabled(&self) -> bool {
-    self.shuffle_enabled.load(Ordering::Acquire)
-  }
-
-  /// Returns the new position of `current_index` after the shuffle/order
-  pub async fn set_shuffle(
-    &self,
-    shuffle: bool,
-    current_index: usize,
-  ) -> Result<usize, PlayerError> {
-    let mut inner = self.inner.lock().await;
-    self.shuffle_enabled.store(shuffle, Ordering::Release);
-
-    if shuffle {
-      let new_index = inner.shuffle_tracks(current_index, &mut rand::rng());
-
-      Ok(new_index)
-    } else {
-      // After `order_tracks` is run `shuffled_track_indicies` maps exactly to `track_list`
-      let track_index = if inner.len() != 0 {
-        inner.shuffled_track_indicies[current_index]
-      } else {
-        0
-      };
-
-      inner.order_tracks();
-      Ok(track_index)
+        let inner = self.inner.lock().await;
+        Some(inner[index].clone())
     }
-  }
 
-  pub async fn clear(&self) -> Result<(), PlayerError> {
-    let mut inner = self.inner.lock().await;
-    inner.clear();
-    self.track_list_len.store(0, Ordering::Release);
+    /// Returns `None` if the track list length is zero
+    pub async fn get_tracks_to_queue(
+        &self,
+        index: usize,
+    ) -> Option<(ArcTrackInstance, Option<ArcTrackInstance>)> {
+        let num_tracks = self.len.load(Ordering::Acquire);
 
-    Ok(())
-  }
+        if index >= num_tracks {
+            return None;
+        }
 
-  /// Returns the new position of `current_index`
-  pub async fn insert_tracks(
-    &self,
-    current_index: usize,
-    position: InsertPosition,
-    tracks: &[Arc<TrackMetadata>],
-    set_as_current: bool,
-  ) -> Result<usize, PlayerError> {
-    let mut inner = self.inner.lock().await;
+        let inner = self.inner.lock().await;
 
-    let track_list_started_empty = inner.len() == 0;
+        let current_track = inner[index].clone();
 
-    let insert_index = match position {
-      InsertPosition::After(track_id) => {
-        let track_index = inner
-          .track_list
-          .iter()
-          .map(|track| track.id)
-          .find(|id| *id == track_id)
-          .ok_or(PlayerError::TrackIdNotFound(track_id))?;
-
-        track_index + 1
-      }
-      InsertPosition::Next => {
-        // Insert tracks into the tracks list after the current song, even if it has been shuffled
-        let current_track_index = if !track_list_started_empty {
-          inner.shuffled_track_indicies[current_index]
+        let is_last_track = index == num_tracks - 1;
+        let next_track = if is_last_track {
+            None
         } else {
-          0
+            Some(inner[index + 1].clone())
         };
 
-        current_track_index.saturating_add_signed(1)
-      }
-      InsertPosition::Start => 0,
-      InsertPosition::End => inner.len(),
-    };
+        Some((current_track, next_track))
+    }
 
-    let shuffle_indicies: Vec<usize> = inner.insert_tracks(insert_index, tracks).collect();
-    let shuffled_track_indicies = &mut inner.shuffled_track_indicies;
+    pub fn shuffle_enabled(&self) -> bool {
+        self.shuffle_enabled.load(Ordering::Acquire)
+    }
 
-    let mut new_current_index = current_index;
-    if self.shuffle_enabled.load(Ordering::Acquire) {
-      let mut rng = rand::rng();
+    /// Returns the new position of `current_index` after the shuffle/order
+    pub async fn set_shuffle(
+        &self,
+        shuffle: bool,
+        current_index: usize,
+    ) -> Result<usize, PlayerError> {
+        let mut inner = self.inner.lock().await;
+        self.shuffle_enabled.store(shuffle, Ordering::Release);
 
-      // Move new shuffle indicies to random locations
-      for shuffle_index in shuffle_indicies {
-        let new_index = rng.random_range(0..=shuffled_track_indicies.len());
+        if shuffle {
+            let new_index = inner.shuffle_tracks(current_index, &mut rand::rng());
 
-        shuffled_track_indicies.insert(new_index, shuffle_index);
-        if new_index <= new_current_index {
-          new_current_index += 1;
+            Ok(new_index)
+        } else {
+            // After `order_tracks` is run `shuffled_track_indicies` maps exactly to `track_list`
+            let track_index = if inner.len() != 0 {
+                inner.shuffled_track_indicies[current_index]
+            } else {
+                0
+            };
+
+            inner.order_tracks();
+            Ok(track_index)
         }
-      }
-    } else {
-      if insert_index <= new_current_index {
-        new_current_index += shuffle_indicies.len();
-      }
-
-      shuffled_track_indicies.splice(insert_index..insert_index, shuffle_indicies);
     }
 
-    self.track_list_len.store(inner.len(), Ordering::Release);
+    pub async fn clear(&self) -> Result<(), PlayerError> {
+        let mut inner = self.inner.lock().await;
+        inner.clear();
+        self.len.store(0, Ordering::Release);
 
-    if set_as_current {
-      new_current_index = insert_index;
+        Ok(())
     }
 
-    if !track_list_started_empty {
-      Ok(new_current_index)
-    } else {
-      Ok(0)
+    /// Returns the new position of `current_index`
+    pub async fn insert_tracks(
+        &self,
+        current_index: usize,
+        position: InsertPosition,
+        tracks: &[Arc<TrackMetadata>],
+        set_as_current: bool,
+    ) -> Result<usize, PlayerError> {
+        let mut inner = self.inner.lock().await;
+
+        let track_list_started_empty = inner.len() == 0;
+
+        let insert_index = match position {
+            InsertPosition::After(track_id) => {
+                let track_index = inner
+                    .track_list
+                    .iter()
+                    .map(|track| track.id)
+                    .find(|id| *id == track_id)
+                    .ok_or(PlayerError::TrackIdNotFound(track_id))?;
+
+                track_index + 1
+            }
+            InsertPosition::Next => {
+                // Insert tracks into the tracks list after the current song, even if it has been shuffled
+                let current_track_index = if track_list_started_empty {
+                    0
+                } else {
+                    inner.shuffled_track_indicies[current_index]
+                };
+
+                current_track_index.saturating_add_signed(1)
+            }
+            InsertPosition::Start => 0,
+            InsertPosition::End => inner.len(),
+        };
+
+        let shuffle_indicies: Vec<usize> = inner.insert_tracks(insert_index, tracks).collect();
+        let shuffled_track_indicies = &mut inner.shuffled_track_indicies;
+
+        let mut new_current_index = current_index;
+        if self.shuffle_enabled.load(Ordering::Acquire) {
+            let mut rng = rand::rng();
+
+            // Move new shuffle indicies to random locations
+            for shuffle_index in shuffle_indicies {
+                let new_index = rng.random_range(0..=shuffled_track_indicies.len());
+
+                shuffled_track_indicies.insert(new_index, shuffle_index);
+                if new_index <= new_current_index {
+                    new_current_index += 1;
+                }
+            }
+        } else {
+            if insert_index <= new_current_index {
+                new_current_index += shuffle_indicies.len();
+            }
+
+            shuffled_track_indicies.splice(insert_index..insert_index, shuffle_indicies);
+        }
+
+        self.len.store(inner.len(), Ordering::Release);
+
+        if set_as_current {
+            new_current_index = insert_index;
+        }
+
+        if track_list_started_empty {
+            Ok(0)
+        } else {
+            Ok(new_current_index)
+        }
     }
-  }
 
-  pub async fn get_tracks(&self) -> Vec<ArcTrackInstance> {
-    let inner = self.inner.lock().await;
+    pub async fn get_tracks(&self) -> Vec<ArcTrackInstance> {
+        let inner = self.inner.lock().await;
 
-    inner.track_list.clone()
-  }
+        inner.track_list.clone()
+    }
 }

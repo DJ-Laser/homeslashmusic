@@ -5,123 +5,123 @@ use hsm_ipc::SeekPosition;
 
 #[derive(Debug, Parser)]
 pub struct Cli {
-  #[command(subcommand)]
-  pub command: Command,
+    #[command(subcommand)]
+    pub command: Command,
 }
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-  Play {
-    #[command(flatten)]
-    tracks: Option<TrackPaths>,
-  },
+    Play {
+        #[command(flatten)]
+        tracks: Option<TrackPaths>,
+    },
 
-  Pause,
-  #[command(alias = "p")]
-  PlayPause,
-  Stop,
+    Pause,
+    #[command(alias = "p")]
+    PlayPause,
+    Stop,
 
-  #[command(alias = "n")]
-  Next,
-  #[command(alias = "prev")]
-  Previous,
+    #[command(alias = "n")]
+    Next,
+    #[command(alias = "prev")]
+    Previous,
 
-  #[command(alias = "vol")]
-  Volume {
-    volume: Option<f32>,
-  },
-  Loop {
-    loop_mode: Option<LoopMode>,
-  },
-  Shuffle {
-    shuffle: Option<ShuffleMode>,
-  },
+    #[command(alias = "vol")]
+    Volume {
+        volume: Option<f32>,
+    },
+    Loop {
+        loop_mode: Option<LoopMode>,
+    },
+    Shuffle {
+        shuffle: Option<ShuffleMode>,
+    },
 
-  Seek {
-    #[arg(value_parser = parse_seek_position)]
-    #[arg(allow_negative_numbers = true)]
-    seek_position: SeekPosition,
-  },
+    Seek {
+        #[arg(value_parser = parse_seek_position)]
+        #[arg(allow_negative_numbers = true)]
+        seek_position: SeekPosition,
+    },
 
-  #[command(args_conflicts_with_subcommands = true)]
-  #[command(alias = "q")]
-  Queue {
-    #[command(subcommand)]
-    command: Option<QueueCommand>,
-    #[command(flatten)]
-    tracks: Option<TrackPaths>,
-  },
+    #[command(args_conflicts_with_subcommands = true)]
+    #[command(alias = "q")]
+    Queue {
+        #[command(subcommand)]
+        command: Option<QueueCommand>,
+        #[command(flatten)]
+        tracks: Option<TrackPaths>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
 pub enum QueueCommand {
-  Clear,
-  Replace {
-    #[command(flatten)]
-    tracks: TrackPaths,
-  },
-  #[command(alias = "append")]
-  Add {
-    #[command(flatten)]
-    tracks: TrackPaths,
-  },
-  Next {
-    #[command(flatten)]
-    tracks: TrackPaths,
-  },
+    Clear,
+    Replace {
+        #[command(flatten)]
+        tracks: TrackPaths,
+    },
+    #[command(alias = "append")]
+    Add {
+        #[command(flatten)]
+        tracks: TrackPaths,
+    },
+    Next {
+        #[command(flatten)]
+        tracks: TrackPaths,
+    },
 }
 
 #[derive(Debug, Args)]
 pub struct TrackPaths {
-  #[arg(num_args = 1..)]
-  pub paths: Vec<PathBuf>,
+    #[arg(num_args = 1..)]
+    pub paths: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, ValueEnum)]
 pub enum LoopMode {
-  Off,
-  #[value(alias = "one")]
-  Track,
-  #[value(aliases = ["on", "all"])]
-  Playlist,
+    Off,
+    #[value(alias = "one")]
+    Track,
+    #[value(aliases = ["on", "all"])]
+    Playlist,
 }
 
 impl From<LoopMode> for hsm_ipc::LoopMode {
-  fn from(val: LoopMode) -> Self {
-    match val {
-      LoopMode::Off => hsm_ipc::LoopMode::None,
-      LoopMode::Track => hsm_ipc::LoopMode::Track,
-      LoopMode::Playlist => hsm_ipc::LoopMode::Playlist,
+    fn from(val: LoopMode) -> Self {
+        match val {
+            LoopMode::Off => hsm_ipc::LoopMode::None,
+            LoopMode::Track => hsm_ipc::LoopMode::Track,
+            LoopMode::Playlist => hsm_ipc::LoopMode::Playlist,
+        }
     }
-  }
 }
 
 #[derive(Debug, Clone, ValueEnum)]
 pub enum ShuffleMode {
-  Off,
-  On,
+    Off,
+    On,
 }
 
 impl From<ShuffleMode> for bool {
-  fn from(val: ShuffleMode) -> Self {
-    match val {
-      ShuffleMode::Off => false,
-      ShuffleMode::On => true,
+    fn from(val: ShuffleMode) -> Self {
+        match val {
+            ShuffleMode::Off => false,
+            ShuffleMode::On => true,
+        }
     }
-  }
 }
 
 fn parse_seek_position(s: &str) -> Result<SeekPosition, ParseFloatError> {
-  if let Some(s) = s.strip_prefix("+") {
-    let secs: f64 = s.parse()?;
-    return Ok(SeekPosition::Forward(Duration::from_secs_f64(secs)));
-  }
+    if let Some(s) = s.strip_prefix("+") {
+        let secs: f64 = s.parse()?;
+        return Ok(SeekPosition::Forward(Duration::from_secs_f64(secs)));
+    }
 
-  if let Some(s) = s.strip_prefix("-") {
-    let secs: f64 = s.parse()?;
-    return Ok(SeekPosition::Backward(Duration::from_secs_f64(secs)));
-  }
+    if let Some(s) = s.strip_prefix("-") {
+        let secs: f64 = s.parse()?;
+        return Ok(SeekPosition::Backward(Duration::from_secs_f64(secs)));
+    }
 
-  let secs: f64 = s.parse()?;
-  Ok(SeekPosition::To(Duration::from_secs_f64(secs)))
+    let secs: f64 = s.parse()?;
+    Ok(SeekPosition::To(Duration::from_secs_f64(secs)))
 }
