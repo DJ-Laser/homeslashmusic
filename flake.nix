@@ -22,17 +22,14 @@
     hsmDeps = with pkgs; [pkg-config alsa-lib];
   in {
     devShells.${system}.default = pkgs.mkShell {
-      buildInputs = with pkgs; [alejandra rustToolchain] ++ hsmDeps;
+      buildInputs = [rustToolchain] ++ hsmDeps;
       RUST_SRC_PATH = "${rustToolchain}/lib/rustlib/src/rust/src";
       LD_LIBRARY_PATH = lib.makeLibraryPath hsmDeps;
     };
 
-    packages.${system}.homeslashmusic = pkgs.callPackage ./nix/homeslashmusic.nix {};
-
-    defaultPackage.${system} = self.packages.${system}.homeslashmusic;
-
-    overlays.default = final: prev: {
-      homeslashmusic = self.packages.${system}.homeslashmusic;
+    packages.${system} = {
+      homeslashmusic = pkgs.callPackage ./nix/homeslashmusic.nix {};
+      default = self.packages.${system}.homeslashmusic;
     };
   };
 }
