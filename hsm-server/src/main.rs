@@ -1,4 +1,5 @@
 mod audio_server;
+mod database;
 mod plugin_manager;
 mod signals;
 
