@@ -27,6 +27,9 @@ urlencoding.workspace = true
 dashmap.workspace = true
 rand.workspace = true
 float-cmp.workspace = true
+slotmap.workspace = true
+serde.workspace = true
+uuid.workspace = true
 
 [lints]
 workspace = true

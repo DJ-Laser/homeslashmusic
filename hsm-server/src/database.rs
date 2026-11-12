@@ -1,155 +1,117 @@
-use std::{collections::BTreeMap, time::Duration};
+mod data;
+pub mod input;
 
-pub type PluginId = String;
-pub type ImageId = String;
-pub type TrackId = String;
-pub type AlbumId = String;
-pub type ArtistId = String;
-pub type PlaylistId = String;
-pub type MixId = String;
+use std::collections::HashMap;
 
-/// The location a track is available to listen from
-/// Includes the plugin that has it, and a plugin-specific id to identify the track
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TrackLocation {
-    plugin: PluginId,
-    id: String,
+use serde::{Deserialize, Serialize};
+use slotmap::DenseSlotMap;
+
+pub use data::*;
+use thiserror::Error;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct LookupMaps {
+    track_by_audio_location: HashMap<AudioLocation, TrackId>,
+    track_by_mbid: HashMap<MusicBrainzId, TrackId>,
+    album_by_mbid: HashMap<MusicBrainzId, AlbumId>,
+    artist_by_mbid: HashMap<MusicBrainzId, ArtistId>,
 }
 
-/// The location a resource's metadata is from
-/// Includes the plugin that has it, and a plugin-specific id to identify the resource
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MetadataLocation {
-    plugin: PluginId,
-    id: String,
+impl LookupMaps {
+    fn update_track(&mut self, id: TrackId, track: &TrackData) {
+        if let Some(mbid) = track.mbid {
+            self.track_by_mbid.insert(mbid, id);
+        }
+
+        for location in &track.audio_locations {
+            self.track_by_audio_location.insert(location.clone(), id);
+        }
+    }
+
+    fn update_album(&mut self, id: AlbumId, album: &AlbumData) {
+        if let Some(mbid) = album.mbid {
+            self.album_by_mbid.insert(mbid, id);
+        }
+    }
+
+    fn update_artist(&mut self, id: ArtistId, artist: &ArtistData) {
+        if let Some(mbid) = artist.mbid {
+            self.artist_by_mbid.insert(mbid, id);
+        }
+    }
+
+    fn update_playlist(&mut self, id: PlaylistId, playlist: &PlaylistData) {
+        let _ = id;
+        let _ = playlist;
+    }
 }
 
-#[derive(Debug, Clone)]
-pub struct TrackData {
-    locations: Vec<TrackLocation>,
-    metadata_location: MetadataLocation,
-
-    /// Name of the track
-    name: String,
-    /// Cover art for the track
-    image: Option<ImageId>,
-    /// Artists associated with this track, sorted as they appear on the track metadata
-    artists: Vec<ArtistId>,
-    /// The track's album and track number, if it is a part of an album
-    album: Option<(AlbumId, u64)>,
-}
-
-#[derive(Debug, Clone)]
-pub struct AlbumData {
-    metadata_location: MetadataLocation,
-    /// Tracks in this album
-    tracks: Vec<TrackId>,
-
-    /// Name of the album
-    name: String,
-    /// Cover art for the album
-    image: Option<ImageId>,
-    /// Artists assocated with this album, sorted as they appear on the album metadata
-    artists: Vec<ArtistId>,
-}
-
-#[derive(Debug, Clone)]
-pub struct ArtistData {
-    metadata_location: MetadataLocation,
-    /// Albums by this artist, unsorted
-    albums: Vec<AlbumId>,
-    /// Tracks (not in an album) by this artist, unsorted
-    tracks: Vec<TrackId>,
-
-    /// Name of the artist
-    name: String,
-    /// Profile image for the artist
-    image: Option<ImageId>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PlaylistEntry {
+#[derive(Error, Debug)]
+pub enum MissingDatabaseId {
+    #[error("Database does not contain key {0:?}")]
     Track(TrackId),
+    #[error("Database does not contain key {0:?}")]
     Album(AlbumId),
+    #[error("Database does not contain key {0:?}")]
+    Artist(ArtistId),
+    #[error("Database does not contain key {0:?}")]
     Playlist(PlaylistId),
-    Mix(MixId),
 }
 
-#[derive(Debug, Clone)]
-pub struct PlaylistData {
-    /// All entries in the playlist, sorted by play order
-    entries: Vec<PlaylistEntry>,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Database {
+    tracks: DenseSlotMap<TrackId, TrackData>,
+    albums: DenseSlotMap<AlbumId, AlbumData>,
+    artists: DenseSlotMap<ArtistId, ArtistData>,
+    playlists: DenseSlotMap<PlaylistId, PlaylistData>,
 
-    /// Name of the playlist
-    name: String,
-    /// Cover image for the playlist
-    image: Option<ImageId>,
+    lookup: LookupMaps,
 }
 
-/// Map of track associations and timestamps, keyed by start time.
-/// Track associations continue until the next key or end of mix
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MixTracks(BTreeMap<Duration, Option<TrackId>>);
-
-impl MixTracks {
-    /// Create a new `MixTracks` with no track associations
-    pub fn new() -> Self {
-        Self(BTreeMap::default())
+impl Database {
+    pub fn get_track(&self, id: TrackId) -> Result<&TrackData, MissingDatabaseId> {
+        self.tracks.get(id).ok_or(MissingDatabaseId::Track(id))
     }
 
-    /// Insert a track association at the specified start time.
-    /// Does not automatically end the track association, use `MixTracks::insert_empty` to do that
-    pub fn insert_option(&mut self, start: Duration, track_id: Option<TrackId>) {
-        if let Some((_, prev_track)) = self.0.range(..start).next_back() {
-            // If the previous track is the same as the current one, inserting is redundant
-            if *prev_track == track_id {
-                return;
-            }
-        } else if track_id.is_none() {
-            // If there is no prior entry and we're setting None, None is already the default
-            self.0.remove(&start);
-            return;
-        }
-
-        // If the immediately following transition has the same track_id, merge them
-        if let Some((next_start, next_track)) = self.0.range(start..).next() {
-            let next_start = *next_start;
-            if next_start != start && *next_track == track_id {
-                self.0.remove(&next_start);
-            }
-        }
-
-        self.0.insert(start, track_id);
+    pub fn insert_track(&mut self, track: TrackData) -> TrackId {
+        self.tracks.insert_with_key(|id| {
+            self.lookup.update_track(id, &track);
+            track
+        })
     }
 
-    /// Insert a track association at the specified start time.
-    /// Does not automatically end the track association, use `MixTracks::insert_empty` to do that
-    pub fn insert(&mut self, start: Duration, track_id: TrackId) {
-        self.insert_option(start, Some(track_id));
+    pub fn get_album(&self, id: AlbumId) -> Result<&AlbumData, MissingDatabaseId> {
+        self.albums.get(id).ok_or(MissingDatabaseId::Album(id))
     }
 
-    /// Insert an empty track association at the specified start time.
-    /// Empty track associations can be used to end the previous track association.
-    /// Does not automatically end the track association, use `MixTracks::insert_empty` to do that
-    pub fn insert_empty(&mut self, start: Duration) {
-        self.insert_option(start, None);
+    pub fn insert_album(&mut self, album: AlbumData) -> AlbumId {
+        self.albums.insert_with_key(|id| {
+            self.lookup.update_album(id, &album);
+            album
+        })
     }
 
-    /// Get the track association at the specified time.
-    pub fn track_at(&self, position: Duration) -> Option<TrackId> {
-        self.0
-            .range(..=position)
-            .next_back()
-            .and_then(|(_, track_id)| track_id.clone())
+    pub fn get_artist(&self, id: ArtistId) -> Result<&ArtistData, MissingDatabaseId> {
+        self.artists.get(id).ok_or(MissingDatabaseId::Artist(id))
     }
-}
 
-#[derive(Debug, Clone)]
-pub struct MixData {
-    tracks: MixTracks,
+    pub fn insert_artist(&mut self, artist: ArtistData) -> ArtistId {
+        self.artists.insert_with_key(|id| {
+            self.lookup.update_artist(id, &artist);
+            artist
+        })
+    }
 
-    /// Name of the mix
-    name: String,
-    /// Cover image for the mix
-    image: Option<ImageId>,
+    pub fn get_playlist(&self, id: PlaylistId) -> Result<&PlaylistData, MissingDatabaseId> {
+        self.playlists
+            .get(id)
+            .ok_or(MissingDatabaseId::Playlist(id))
+    }
+
+    pub fn insert_playlist(&mut self, playlist: PlaylistData) -> PlaylistId {
+        self.playlists.insert_with_key(|id| {
+            self.lookup.update_playlist(id, &playlist);
+            playlist
+        })
+    }
 }

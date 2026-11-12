@@ -40,3 +40,9 @@ basically, I will id tracks by their metadata. tracks with the same name by the 
 The metadata gathered by the source plugins will be used by the metadata plugins to find the cannonical metadata for the resource, defaulting to the source plugin's info. Then it will be instered into the database. If it already exists in the database, the metadata will not be updated (since it already has the metadata from the highest priority metadata plugin), but a new location will be added for where to access the resource.
 
 Locations are the way to handle deduplicating tracks when multiple source plugins find a track. While the track's cannonical metadata from the metadata plugin is it's only entry in the database, that entry may contain multiple locations for where to get the track audio. The location from the highest priority source plugin will be used.
+
+### Metadata sources:
+
+Properly tagged files will have a musicbrainz id associated with them. Audio from streaming services can be reverse-searched by it's url. If neither option works, an accoustid fingerprint can be taken and searched in the accoustid database. MusicBrainz is the favored source of metadata because it has like all the metadata ever in a central place.
+
+Musicbrainz will be the only metadata plugin, because supporting other ones is gonna be too much work. Also, you should just properly tag your music anyway. The one thing I may do not on musicbrainz is artist photos, descriptions, and song lyrics if I add that
