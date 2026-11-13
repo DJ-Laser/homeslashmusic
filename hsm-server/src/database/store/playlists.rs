@@ -1,8 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::database::store::{
-    AlbumId, DatabaseStore, MissingDatabaseId, ResourceLocation, TrackId,
-};
+use crate::database::store::{AlbumId, DatabaseStore, MissingDatabaseId, ResourceLocation, SongId};
 
 slotmap::new_key_type! {
     pub struct PlaylistId;
@@ -10,7 +8,7 @@ slotmap::new_key_type! {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PlaylistEntry {
-    Track(TrackId),
+    Song(SongId),
     Album(AlbumId),
     Playlist(PlaylistId),
 }

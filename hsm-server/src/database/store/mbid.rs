@@ -3,7 +3,7 @@ use std::fmt::Display;
 use serde::{Deserialize, Serialize};
 
 /// The location of a resource (audio or metadata) provided by a plugin
-/// Includes the plugin that has it, and a plugin-specific id to identify the track
+/// Includes the plugin that has it, and a plugin-specific id to identify the song
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ResourceLocation {
     pub plugin: String,

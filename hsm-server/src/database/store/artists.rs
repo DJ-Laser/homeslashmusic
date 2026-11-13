@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::database::store::{
-    AlbumId, DatabaseStore, MissingDatabaseId, MusicBrainzId, ResourceLocation, TrackId,
+    AlbumId, DatabaseStore, MissingDatabaseId, MusicBrainzId, ResourceLocation, SongId,
 };
 
 slotmap::new_key_type! {
@@ -9,13 +9,29 @@ slotmap::new_key_type! {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DerivedArtistData {
+    pub albums: Vec<AlbumId>,
+    pub songs: Vec<SongId>,
+}
+
+impl DerivedArtistData {
+    /// Albums by this artist, unsorted
+    pub fn albums(&self) -> &Vec<AlbumId> {
+        &self.albums
+    }
+
+    /// Songs by this artist, unsorted
+    pub fn songs(&self) -> &Vec<SongId> {
+        &self.songs
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ArtistData {
     /// The `MusicBrainzId` for this artist
     pub mbid: Option<MusicBrainzId>,
-    /// Albums by this artist, unsorted
-    pub albums: Vec<AlbumId>,
-    /// Tracks (not in an album) by this artist, unsorted
-    pub tracks: Vec<TrackId>,
+    /// Artist data derrived other database entries
+    pub derived: DerivedArtistData,
 
     /// Name of the artist
     pub name: Option<String>,
@@ -47,6 +63,22 @@ impl DatabaseStore {
         &mut self,
         mbid: MusicBrainzId,
         mut artist: ArtistData,
-    ) -> ArtistId {
+    ) -> Result<ArtistId, MissingDatabaseId> {
+        let Some(id) = self.lookup_artist_by_mbid(&mbid) else {
+            artist.mbid = Some(mbid);
+            return Ok(self.insert_artist(artist));
+        };
+
+        let db_artist = self
+            .artists
+            .get_mut(id)
+            .ok_or(MissingDatabaseId::Artist(id))?;
+
+        db_artist.name = artist.name;
+        db_artist.sort_name = artist.sort_name;
+        db_artist.image = artist.image;
+        db_artist.genres = artist.genres;
+
+        Ok(id)
     }
 }

@@ -10,25 +10,25 @@ use thiserror::Error;
 use crate::database::{
     jobs::JobContext,
     sources::musicbrainz,
-    store::{AlbumData, AlbumId, ArtistData, ArtistId, MusicBrainzId, TrackData, TrackId},
+    store::{AlbumData, AlbumId, ArtistData, ArtistId, MusicBrainzId, SongData, SongId},
 };
 
 const PLUGIN_ID: &str = "local_files";
 
 #[derive(Debug, Error)]
-pub enum LoadTrackError {
+pub enum LoadFileError {
     #[error("{0}")]
     IoError(#[from] io::Error),
 
     #[error("{0}")]
     ParseFailed(#[from] lofty::error::FileParseError),
 
-    #[error("Track missing MusicBrainz id")]
+    #[error("song missing MusicBrainz id")]
     MissingMbid,
 }
 
-/// Load a `Track` from a specified file path
-pub async fn parse_file_tags(path: PathBuf) -> Result<(Duration, Option<Tag>), LoadTrackError> {
+/// Load a `song` from a specified file path
+pub async fn parse_file_tags(path: PathBuf) -> Result<(Duration, Option<Tag>), LoadFileError> {
     smol::unblock(move || {
         let mut tagged_file = lofty::read_from_path(path)?;
 
@@ -118,11 +118,7 @@ fn get_date(tag: &Tag) -> Option<String> {
 
 fn get_album(ctx: &JobContext, tag: &Tag) -> Option<AlbumId> {
     //TODO: Support not having an mbid
-    let mbid = tag.get_string(ItemKey::MusicBrainzReleaseId)?;
-
-    let Ok(mbid) = MusicBrainzId::parse_str(mbid) else {
-        return None;
-    };
+    let mbid = MusicBrainzId::parse_str(tag.get_string(ItemKey::MusicBrainzReleaseId)?).ok()?;
 
     if let Some(id) = ctx.read_db(|db| db.lookup_album_by_mbid(&mbid)) {
         return Some(id);
@@ -133,17 +129,17 @@ fn get_album(ctx: &JobContext, tag: &Tag) -> Option<AlbumId> {
     let artists_text = tag.get_string(ItemKey::AlbumArtist).map(Into::into);
     let genres = get_genres(tag);
     let date = get_date(tag);
-    let track_count = tag.track_total();
+    let song_count = tag.track_total();
 
     let album = ctx.write_db(|db| {
         db.insert_album(AlbumData {
             mbid: Some(mbid),
-            name,
+            title: name,
             artists,
             artists_text,
             genres,
             date,
-            track_count,
+            track_count: song_count,
             ..Default::default()
         })
     });
@@ -153,53 +149,75 @@ fn get_album(ctx: &JobContext, tag: &Tag) -> Option<AlbumId> {
     Some(album)
 }
 
-async fn load_track_file(ctx: JobContext, path: PathBuf) -> Result<TrackId, LoadTrackError> {
-    let (duration, Some(ref tag)) = parse_file_tags(path).await? else {
-        return Err(LoadTrackError::MissingMbid);
+fn parse_song_length(input: &str) -> Option<Duration> {
+    let mut parts = input.trim().rsplit(':');
+
+    let secs: u64 = parts.next()?.parse().ok()?;
+
+    let mins: u64 = parts.next()?.parse().ok()?;
+
+    let hours: u64 = match parts.next() {
+        Some(h) => h.parse().ok()?,
+        None => 0,
     };
 
+    // Don't accept input with four or more colon separated values
+    if parts.next().is_some() {
+        return None;
+    }
+
+    let total_secs = hours * 3600 + mins * 60 + secs;
+    Some(Duration::from_secs(total_secs))
+}
+
+fn get_song(ctx: &JobContext, tag: &Tag) -> Option<SongId> {
     //TODO: Support not having an mbid
-    let mbid = tag
-        .get_string(ItemKey::MusicBrainzRecordingId)
-        .ok_or(LoadTrackError::MissingMbid)?;
+    let mbid = MusicBrainzId::parse_str(tag.get_string(ItemKey::MusicBrainzRecordingId)?).ok()?;
 
-    let Ok(mbid) = MusicBrainzId::parse_str(mbid) else {
-        return Err(LoadTrackError::MissingMbid);
-    };
-
-    if let Some(id) = ctx.read_db(|db| db.lookup_track_by_mbid(&mbid)) {
-        return Ok(id);
+    if let Some(id) = ctx.read_db(|db| db.lookup_song_by_mbid(&mbid)) {
+        return Some(id);
     }
 
     let name = tag.title().map(Into::into);
-    let artists = get_artists(&ctx, tag, false);
+    let artists = get_artists(ctx, tag, false);
     let artists_text = tag.get_string(ItemKey::TrackArtist).map(Into::into);
-    let album = get_album(&ctx, tag);
-    let track_number = tag.track_total();
     let genres = get_genres(tag);
     let date = get_date(tag);
+    let length = tag.get_string(ItemKey::Length).and_then(parse_song_length);
 
-    let track = ctx.write_db(|db| {
-        db.insert_track(TrackData {
+    let song = ctx.write_db(|db| {
+        db.insert_song(SongData {
             mbid: Some(mbid),
-            name,
+            title: name,
             artists,
             artists_text,
-            album,
-            track_number,
             genres,
             date,
-            length: Some(duration),
+            length,
             ..Default::default()
         })
     });
 
     ctx.spawn_detatched(musicbrainz::fetch_recording(ctx.clone(), mbid));
 
-    Ok(track)
+    Some(song)
 }
 
-async fn search_directory(ctx: JobContext, path: PathBuf) -> Vec<(PathBuf, LoadTrackError)> {
+async fn load_song_file(
+    ctx: JobContext,
+    path: PathBuf,
+) -> Result<(Option<SongId>, Option<AlbumId>), LoadFileError> {
+    let (_duration, Some(ref tag)) = parse_file_tags(path).await? else {
+        return Err(LoadFileError::MissingMbid);
+    };
+
+    let song = get_song(&ctx, tag);
+    let album = get_album(&ctx, tag);
+
+    Ok((song, album))
+}
+
+async fn search_directory(ctx: JobContext, path: PathBuf) -> Vec<(PathBuf, LoadFileError)> {
     let mut entries = match smol::fs::read_dir(&path).await {
         Ok(files) => files,
         Err(error) => {
@@ -232,7 +250,7 @@ async fn search_directory(ctx: JobContext, path: PathBuf) -> Vec<(PathBuf, LoadT
 fn search_file_or_directory(
     ctx: JobContext,
     path: PathBuf,
-) -> impl Future<Output = Vec<(PathBuf, LoadTrackError)>> + Send {
+) -> impl Future<Output = Vec<(PathBuf, LoadFileError)>> + Send {
     Box::pin(async move {
         let metadata = match smol::fs::metadata(&path).await {
             Ok(metadata) => metadata,
@@ -244,7 +262,7 @@ fn search_file_or_directory(
         if metadata.is_dir() {
             search_directory(ctx, path).await
         } else {
-            match load_track_file(ctx, path.clone()).await {
+            match load_song_file(ctx, path.clone()).await {
                 Ok(_) => Vec::new(),
                 Err(error) => vec![(path, error)],
             }
@@ -252,6 +270,6 @@ fn search_file_or_directory(
     })
 }
 
-pub async fn load_tracks_from_path(ctx: JobContext, path: PathBuf) {
+pub async fn load_all_from_path(ctx: JobContext, path: PathBuf) {
     search_file_or_directory(ctx, path).await;
 }

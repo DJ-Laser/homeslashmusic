@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::{
     path::PathBuf,
     sync::{Arc, RwLock},
@@ -34,7 +36,7 @@ impl MusicDatabase {
 
         self.executor
             .spawn(async move {
-                sources::local_files::load_tracks_from_path(ctx.clone(), path).await;
+                sources::local_files::load_all_from_path(ctx.clone(), path).await;
 
                 //ctx.read_db(|db| println!("{db:?}"));
             })
