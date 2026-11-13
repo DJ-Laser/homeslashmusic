@@ -1,10 +1,10 @@
 mod albums;
 mod artists;
-mod ids;
+mod mbid;
 mod playlists;
 mod tracks;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 use slotmap::DenseSlotMap;
@@ -12,7 +12,7 @@ use thiserror::Error;
 
 pub use albums::*;
 pub use artists::*;
-pub use ids::*;
+pub use mbid::*;
 pub use playlists::*;
 pub use tracks::*;
 
@@ -73,64 +73,23 @@ pub struct DatabaseStore {
     playlists: DenseSlotMap<PlaylistId, PlaylistData>,
 
     lookup: LookupMaps,
+    unqueried_mbids: HashSet<MusicBrainzId>,
 }
 
 impl DatabaseStore {
-    pub fn get_track(&self, id: TrackId) -> Result<&TrackData, MissingDatabaseId> {
-        self.tracks.get(id).ok_or(MissingDatabaseId::Track(id))
+    /// Check if the database has a pending query for a certain `MusicBrainzId`
+    /// If not, the mbid is added to the set of pending queries
+    pub fn has_pending_mbid_query(&mut self, mbid: MusicBrainzId) -> bool {
+        if self.unqueried_mbids.contains(&mbid) {
+            return true;
+        }
+
+        self.unqueried_mbids.insert(mbid);
+        false
     }
 
-    pub fn lookup_track_by_mbid(&self, mbid: &MusicBrainzId) -> Option<TrackId> {
-        self.lookup.track_by_mbid.get(mbid).copied()
-    }
-
-    pub fn insert_track(&mut self, track: TrackData) -> TrackId {
-        self.tracks.insert_with_key(|id| {
-            self.lookup.update_track(id, &track);
-            track
-        })
-    }
-
-    pub fn get_album(&self, id: AlbumId) -> Result<&AlbumData, MissingDatabaseId> {
-        self.albums.get(id).ok_or(MissingDatabaseId::Album(id))
-    }
-
-    pub fn lookup_album_by_mbid(&self, mbid: &MusicBrainzId) -> Option<AlbumId> {
-        self.lookup.album_by_mbid.get(mbid).copied()
-    }
-
-    pub fn insert_album(&mut self, album: AlbumData) -> AlbumId {
-        self.albums.insert_with_key(|id| {
-            self.lookup.update_album(id, &album);
-            album
-        })
-    }
-
-    pub fn get_artist(&self, id: ArtistId) -> Result<&ArtistData, MissingDatabaseId> {
-        self.artists.get(id).ok_or(MissingDatabaseId::Artist(id))
-    }
-
-    pub fn lookup_artist_by_mbid(&self, mbid: &MusicBrainzId) -> Option<ArtistId> {
-        self.lookup.artist_by_mbid.get(mbid).copied()
-    }
-
-    pub fn insert_artist(&mut self, artist: ArtistData) -> ArtistId {
-        self.artists.insert_with_key(|id| {
-            self.lookup.update_artist(id, &artist);
-            artist
-        })
-    }
-
-    pub fn get_playlist(&self, id: PlaylistId) -> Result<&PlaylistData, MissingDatabaseId> {
-        self.playlists
-            .get(id)
-            .ok_or(MissingDatabaseId::Playlist(id))
-    }
-
-    pub fn insert_playlist(&mut self, playlist: PlaylistData) -> PlaylistId {
-        self.playlists.insert_with_key(|id| {
-            self.lookup.update_playlist(id, &playlist);
-            playlist
-        })
+    /// Mark the query for the specified mbid as completed and remove it from the pending set
+    pub fn complete_mbid_query(&mut self, mbid: &MusicBrainzId) {
+        self.unqueried_mbids.remove(mbid);
     }
 }

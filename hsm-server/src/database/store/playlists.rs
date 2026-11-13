@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use crate::database::store::{AlbumId, ResourceLocation, TrackId};
+use crate::database::store::{
+    AlbumId, DatabaseStore, MissingDatabaseId, ResourceLocation, TrackId,
+};
 
 slotmap::new_key_type! {
     pub struct PlaylistId;
@@ -24,4 +26,19 @@ pub struct PlaylistData {
     pub image: Option<ResourceLocation>,
     /// The genres associated with this playlist, sorted by relevance
     pub genres: Vec<String>,
+}
+
+impl DatabaseStore {
+    pub fn get_playlist(&self, id: PlaylistId) -> Result<&PlaylistData, MissingDatabaseId> {
+        self.playlists
+            .get(id)
+            .ok_or(MissingDatabaseId::Playlist(id))
+    }
+
+    pub fn insert_playlist(&mut self, playlist: PlaylistData) -> PlaylistId {
+        self.playlists.insert_with_key(|id| {
+            self.lookup.update_playlist(id, &playlist);
+            playlist
+        })
+    }
 }

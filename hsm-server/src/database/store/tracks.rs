@@ -2,7 +2,9 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::database::store::{AlbumId, ArtistId, MusicBrainzId, ResourceLocation};
+use crate::database::store::{
+    AlbumId, ArtistId, DatabaseStore, MissingDatabaseId, MusicBrainzId, ResourceLocation,
+};
 
 slotmap::new_key_type! {
     pub struct TrackId;
@@ -35,4 +37,21 @@ pub struct TrackData {
     pub date: Option<String>,
     /// The length of this track
     pub length: Option<Duration>,
+}
+
+impl DatabaseStore {
+    pub fn get_track(&self, id: TrackId) -> Result<&TrackData, MissingDatabaseId> {
+        self.tracks.get(id).ok_or(MissingDatabaseId::Track(id))
+    }
+
+    pub fn lookup_track_by_mbid(&self, mbid: &MusicBrainzId) -> Option<TrackId> {
+        self.lookup.track_by_mbid.get(mbid).copied()
+    }
+
+    pub fn insert_track(&mut self, track: TrackData) -> TrackId {
+        self.tracks.insert_with_key(|id| {
+            self.lookup.update_track(id, &track);
+            track
+        })
+    }
 }

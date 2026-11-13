@@ -33,44 +33,54 @@ where
     T::fetch().id(&mbid.to_string()).execute_async().await
 }
 
-pub async fn fetch_artist(ctx: JobContext, mbid: MusicBrainzId) -> Option<ArtistId> {
+pub async fn fetch_artist(ctx: JobContext, mbid: MusicBrainzId) {
+    if ctx.write_db(|db| db.has_pending_mbid_query(mbid)) {
+        return;
+    }
+
     let response = match fetch_rate_limited::<Artist>(&mbid).await {
         Ok(response) => response,
         Err(err) => {
             eprintln!("{err:?}");
-            return None;
+            return;
         }
     };
 
-    println!("{response:?}");
+    response;
 
-    None
+    ctx.write_db(|db| {
+        db.complete_mbid_query(&mbid);
+    });
 }
 
-pub async fn fetch_release(ctx: JobContext, mbid: MusicBrainzId) -> Option<ArtistId> {
+pub async fn fetch_release(ctx: JobContext, mbid: MusicBrainzId) {
+    if ctx.write_db(|db| db.has_pending_mbid_query(mbid)) {
+        return;
+    }
+
     let response = match fetch_rate_limited::<Release>(&mbid).await {
         Ok(response) => response,
         Err(err) => {
             eprintln!("{err:?}");
-            return None;
+            return;
         }
     };
 
     println!("{response:?}");
-
-    None
 }
 
-pub async fn fetch_recording(ctx: JobContext, mbid: MusicBrainzId) -> Option<ArtistId> {
+pub async fn fetch_recording(ctx: JobContext, mbid: MusicBrainzId) {
+    if ctx.write_db(|db| db.has_pending_mbid_query(mbid)) {
+        return;
+    }
+
     let response = match fetch_rate_limited::<Recording>(&mbid).await {
         Ok(response) => response,
         Err(err) => {
             eprintln!("{err:?}");
-            return None;
+            return;
         }
     };
 
     println!("{response:?}");
-
-    None
 }

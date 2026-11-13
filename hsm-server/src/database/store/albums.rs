@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use crate::database::store::{ArtistId, MusicBrainzId, ResourceLocation, TrackId};
+use crate::database::store::{
+    ArtistId, DatabaseStore, MissingDatabaseId, MusicBrainzId, ResourceLocation, TrackId,
+};
 
 slotmap::new_key_type! {
     pub struct AlbumId;
@@ -27,4 +29,21 @@ pub struct AlbumData {
     pub date: Option<String>,
     /// The total number of tracks included in this album
     pub track_count: Option<u32>,
+}
+
+impl DatabaseStore {
+    pub fn get_album(&self, id: AlbumId) -> Result<&AlbumData, MissingDatabaseId> {
+        self.albums.get(id).ok_or(MissingDatabaseId::Album(id))
+    }
+
+    pub fn lookup_album_by_mbid(&self, mbid: &MusicBrainzId) -> Option<AlbumId> {
+        self.lookup.album_by_mbid.get(mbid).copied()
+    }
+
+    pub fn insert_album(&mut self, album: AlbumData) -> AlbumId {
+        self.albums.insert_with_key(|id| {
+            self.lookup.update_album(id, &album);
+            album
+        })
+    }
 }
