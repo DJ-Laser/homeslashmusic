@@ -25,7 +25,7 @@ symphonia = { version = "0.5.4", features = ["mp3", "isomp4", "aac"] }
 lofty = { version = "0.25.5", features = ["serde"] }
 smol = "2.0.2"
 rustix = { version = "1.0.8", features = ["process"] }
-async-signal = "0.2.12"
+async-signal = "0.2.14"
 futures-concurrency = "7.6.3"
 async-oneshot = "0.5.9"
 thiserror = "2.0.12"
@@ -37,6 +37,8 @@ rand = "0.9.2"
 float-cmp = "0.10.0"
 uuid = { version = "1.29.2", features = ["serde"] }
 slotmap = { version = "1.1.1", features = ["serde"] }
+musicbrainz_rs = { version = "0.14.0", features = ["async", "rustls"] }
+governor = "0.8"
 
 serde = { version = "1.0.221", features = ["derive"] }
 serde_json = "1.0.140"

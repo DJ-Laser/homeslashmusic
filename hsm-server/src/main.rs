@@ -3,7 +3,7 @@ mod database;
 mod plugin_manager;
 mod signals;
 
-use std::sync::Arc;
+use std::{env, future, path::PathBuf, sync::Arc};
 
 use audio_server::{AudioServer, AudioServerError};
 use futures_concurrency::future::Race;
@@ -13,6 +13,8 @@ use plugin_manager::{PluginError, PluginManager, PluginRunner};
 use signals::{SignalHandler, SignalHandlerError};
 use smol::Executor;
 use thiserror::Error;
+
+use crate::database::MusicDatabase;
 
 #[derive(Debug, Error)]
 pub enum MainError {
@@ -60,10 +62,22 @@ async fn run_servers(ex: &Arc<Executor<'static>>) -> Result<(), MainError> {
 
 fn main() {
     let ex: Arc<Executor<'static>> = Arc::new(Executor::new());
-    match smol::block_on(ex.run(run_servers(&ex))) {
+    /*match smol::block_on(ex.run(run_servers(&ex))) {
         Ok(()) => (),
         Err(error) => eprintln!("{error}"),
     }
 
-    println!("hsm-server shutting down");
+    println!("hsm-server shutting down");*/
+
+    let Some(arg) = env::args().nth(1) else {
+        eprintln!("Specify a path to search");
+        return;
+    };
+
+    let path = PathBuf::from(arg);
+    let db = MusicDatabase::new_empty(ex.clone());
+    smol::block_on(ex.run(async move {
+        db.start_update(path).await;
+        future::pending::<()>().await;
+    }));
 }

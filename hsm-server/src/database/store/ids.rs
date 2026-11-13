@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use serde::{Deserialize, Serialize};
 
 /// The location of a resource (audio or metadata) provided by a plugin
@@ -14,6 +16,12 @@ pub struct MusicBrainzId(uuid::Uuid);
 impl MusicBrainzId {
     pub fn parse_str(uuid_str: &str) -> Result<Self, uuid::Error> {
         Ok(Self(uuid::Uuid::try_parse(uuid_str)?))
+    }
+}
+
+impl Display for MusicBrainzId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
     }
 }
 

@@ -16,7 +16,7 @@ pub use ids::*;
 pub use playlists::*;
 pub use tracks::*;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct LookupMaps {
     track_by_audio_location: HashMap<ResourceLocation, TrackId>,
     track_by_mbid: HashMap<MusicBrainzId, TrackId>,
@@ -65,7 +65,7 @@ pub enum MissingDatabaseId {
     Playlist(PlaylistId),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct DatabaseStore {
     tracks: DenseSlotMap<TrackId, TrackData>,
     albums: DenseSlotMap<AlbumId, AlbumData>,

@@ -14,6 +14,10 @@ pub struct JobContext {
 }
 
 impl JobContext {
+    pub fn new(executor: Arc<Executor<'static>>, db: Arc<RwLock<DatabaseStore>>) -> Self {
+        Self { executor, db }
+    }
+
     /// Spawn a new job that runs in parallel to the current job.
     /// Once the job completes the commit phase, the furure will finish.
     /// Dropping this future will cancel the job. Use `spawn_detatched` to keep it running

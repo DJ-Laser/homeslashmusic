@@ -31,6 +31,8 @@ float-cmp.workspace = true
 slotmap.workspace = true
 serde.workspace = true
 uuid.workspace = true
+musicbrainz_rs.workspace = true
+governor.workspace = true
 
 [lints]
 workspace = true
