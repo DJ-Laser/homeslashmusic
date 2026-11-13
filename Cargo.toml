@@ -22,6 +22,7 @@ hsm-plugin-ipc = { path = "./plugins/ipc" }
 
 rodio = { version = "0.21.1", default-features = false, features = ["playback", "symphonia"] }
 symphonia = { version = "0.5.4", features = ["mp3", "isomp4", "aac"] }
+lofty = { version = "0.25.5", features = ["serde"] }
 smol = "2.0.2"
 rustix = { version = "1.0.8", features = ["process"] }
 async-signal = "0.2.12"

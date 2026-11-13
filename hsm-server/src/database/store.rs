@@ -1,5 +1,6 @@
 mod albums;
 mod artists;
+mod ids;
 mod playlists;
 mod tracks;
 
@@ -11,19 +12,9 @@ use thiserror::Error;
 
 pub use albums::*;
 pub use artists::*;
+pub use ids::*;
 pub use playlists::*;
 pub use tracks::*;
-
-/// The location of a resource (audio or metadata) provided by a plugin
-/// Includes the plugin that has it, and a plugin-specific id to identify the track
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct ResourceLocation {
-    pub plugin: String,
-    pub id: String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct MusicBrainzId(uuid::Uuid);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct LookupMaps {
@@ -89,6 +80,10 @@ impl DatabaseStore {
         self.tracks.get(id).ok_or(MissingDatabaseId::Track(id))
     }
 
+    pub fn lookup_track_by_mbid(&self, mbid: &MusicBrainzId) -> Option<TrackId> {
+        self.lookup.track_by_mbid.get(mbid).copied()
+    }
+
     pub fn insert_track(&mut self, track: TrackData) -> TrackId {
         self.tracks.insert_with_key(|id| {
             self.lookup.update_track(id, &track);
@@ -100,6 +95,10 @@ impl DatabaseStore {
         self.albums.get(id).ok_or(MissingDatabaseId::Album(id))
     }
 
+    pub fn lookup_album_by_mbid(&self, mbid: &MusicBrainzId) -> Option<AlbumId> {
+        self.lookup.album_by_mbid.get(mbid).copied()
+    }
+
     pub fn insert_album(&mut self, album: AlbumData) -> AlbumId {
         self.albums.insert_with_key(|id| {
             self.lookup.update_album(id, &album);
@@ -109,6 +108,10 @@ impl DatabaseStore {
 
     pub fn get_artist(&self, id: ArtistId) -> Result<&ArtistData, MissingDatabaseId> {
         self.artists.get(id).ok_or(MissingDatabaseId::Artist(id))
+    }
+
+    pub fn lookup_artist_by_mbid(&self, mbid: &MusicBrainzId) -> Option<ArtistId> {
+        self.lookup.artist_by_mbid.get(mbid).copied()
     }
 
     pub fn insert_artist(&mut self, artist: ArtistData) -> ArtistId {

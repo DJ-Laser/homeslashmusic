@@ -26,7 +26,7 @@ impl JobContext {
     }
 
     /// Spawn a new job that runs in parallel to the current job.
-    /// The job will
+    /// The job will run in the background
     pub fn spawn_detatched<F>(&self, fut: F)
     where
         F: Future + Send + 'static,

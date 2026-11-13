@@ -1,24 +1,16 @@
-use std::{
-    fs::File,
-    io,
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::{io, iter, path::PathBuf, time::Duration};
 
-use hsm_ipc::TrackMetadata;
-use symphonia::core::{
-    codecs::CODEC_TYPE_NULL,
-    errors::Error as SymphoniaError,
-    formats::FormatOptions,
-    io::{MediaSourceStream, MediaSourceStreamOptions},
-    meta::{Metadata, MetadataOptions, MetadataRevision, StandardTagKey, Tag, Value},
-    probe::{Hint, ProbeResult},
+use lofty::{
+    file::{AudioFile, TaggedFileExt},
+    tag::{Accessor, ItemKey, Tag},
 };
+use smol::stream::StreamExt as _;
 use thiserror::Error;
 
 use crate::database::{
     jobs::JobContext,
-    store::{AlbumData, ArtistData, MusicBrainzId, ResourceLocation, TrackData},
+    sources::musicbrainz,
+    store::{AlbumData, AlbumId, ArtistData, ArtistId, MusicBrainzId, TrackData, TrackId},
 };
 
 const PLUGIN_ID: &str = "local_files";
@@ -26,146 +18,240 @@ const PLUGIN_ID: &str = "local_files";
 #[derive(Debug, Error)]
 pub enum LoadTrackError {
     #[error("{0}")]
-    IoError(#[source] io::Error),
+    IoError(#[from] io::Error),
 
     #[error("{0}")]
-    ProbeFailed(#[source] SymphoniaError),
+    ParseFailed(#[from] lofty::error::FileParseError),
 
-    #[error("Track has no supported audio codec")]
-    CodecNotSupported,
-}
-
-/// Use symphonia to probe the track for metadata
-/// Uses the default symphonia probe and the path's extension as a `Hint`
-fn probe_track_sync(path: &Path) -> Result<ProbeResult, LoadTrackError> {
-    let mut hint = Hint::new();
-    if let Some(extension) = path.extension().and_then(|s| s.to_str()) {
-        hint.with_extension(extension);
-    }
-
-    // Use the default options for metadata and format readers.
-    let meta_opts: MetadataOptions = MetadataOptions::default();
-    let fmt_opts: FormatOptions = FormatOptions::default();
-
-    let src = File::open(path).map_err(LoadTrackError::IoError)?;
-    let mss = MediaSourceStream::new(Box::new(src), MediaSourceStreamOptions::default());
-    let probed = symphonia::default::get_probe()
-        .format(&hint, mss, &fmt_opts, &meta_opts)
-        .map_err(LoadTrackError::ProbeFailed)?;
-
-    Ok(probed)
+    #[error("Track missing MusicBrainz id")]
+    MissingMbid,
 }
 
 /// Load a `Track` from a specified file path
-pub async fn load_file(
-    ctx: JobContext,
-    path: PathBuf,
-) -> Result<(Option<Duration>, Option<Metadata<'static>>), LoadTrackError> {
+pub async fn parse_file_tags(path: PathBuf) -> Result<(Duration, Option<Tag>), LoadTrackError> {
     smol::unblock(move || {
-        let mut probed = probe_track_sync(&path)?;
+        let mut tagged_file = lofty::read_from_path(path)?;
 
-        let audio_track = probed
-            .format
-            .tracks()
-            .iter()
-            .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
-            .ok_or(LoadTrackError::CodecNotSupported)?;
+        let tag = tagged_file
+            .remove(tagged_file.primary_tag_type())
+            .or_else(|| {
+                let tag_type = tagged_file.first_tag()?.tag_type();
+                tagged_file.remove(tag_type)
+            });
 
-        let codec_params = &audio_track.codec_params;
-
-        let codec_duration: Option<Duration> = codec_params
-            .time_base
-            .zip(codec_params.n_frames)
-            .map(|(base, spans)| base.calc_time(spans).into());
-
-        let metadata = if probed.format.metadata().current().is_some() {
-            Some(probed.format.metadata())
-        } else {
-            probed.metadata.get()
-        };
-
-        let mut scan = TrackScan::default();
-        scan.path = path;
-        scan.duration = codec_duration;
-
-        if let Some(metadata) = metadata.as_ref().and_then(|m| m.current()) {
-            for tag in metadata.tags() {
-                process_metadata(&mut scan, tag);
-            }
-        }
-
-        //Ok((total_duration, metadata))
-        todo!()
+        Ok((tagged_file.properties().duration(), tag))
     })
     .await
 }
 
-#[derive(Debug, Default)]
-pub struct TrackScan {
-    path: PathBuf,
-    name: Option<String>,
-    duration: Option<Duration>,
-    date: Option<String>,
-    genres: Vec<String>,
-    mbid: Option<String>,
+fn get_artists(ctx: &JobContext, tag: &Tag, album: bool) -> Vec<ArtistId> {
+    let (artist_key, multi_artist_key, multi_mbid_key) = if album {
+        (
+            ItemKey::AlbumArtist,
+            ItemKey::AlbumArtists,
+            ItemKey::MusicBrainzReleaseArtistId,
+        )
+    } else {
+        (
+            ItemKey::TrackArtist,
+            ItemKey::TrackArtists,
+            ItemKey::MusicBrainzArtistId,
+        )
+    };
 
-    artist: Option<String>,
-    artsits: Vec<String>,
-    artist_mbids: Vec<String>,
+    let mut artists = Vec::new();
 
-    album: Option<String>,
-    track_number: Option<u64>,
-    album_mbid: Option<String>,
+    let mbids: Vec<_> = tag.get_strings(multi_mbid_key).collect();
+    let names: Vec<_> = tag.get_strings(multi_artist_key).collect();
+
+    ctx.write_db(|db| {
+        let mut find_artist = |mbid, name: Option<&str>| {
+            let Ok(mbid) = MusicBrainzId::parse_str(mbid) else {
+                return;
+            };
+
+            if let Some(id) = db.lookup_artist_by_mbid(&mbid) {
+                artists.push(id);
+                return;
+            }
+
+            let id = db.insert_artist(ArtistData {
+                mbid: Some(mbid),
+                name: name.map(Into::into),
+                ..Default::default()
+            });
+
+            artists.push(id);
+            ctx.spawn_detatched(musicbrainz::fetch_artist(ctx.clone(), mbid));
+        };
+
+        if names.is_empty() && mbids.len() == 1 {
+            // Fall back to single-value tag if there is only one mbid
+            let mbid = mbids.first().expect("verified len == 1");
+            let name = tag.get_string(artist_key);
+
+            find_artist(*mbid, name);
+        } else if !mbids.is_empty() {
+            // For each mbid insert an artist, which may or may not have a name
+            // If names.len() > mbids.len() extra names will be discarded
+            for (mbid, name) in mbids
+                .into_iter()
+                .zip(names.into_iter().map(Some).chain(iter::repeat(None)))
+            {
+                find_artist(mbid, name);
+            }
+        }
+    });
+
+    artists
 }
 
-fn split_multi_tag(tag_value: &str) -> impl Iterator<Item = String> {
-    tag_value
-        .split('\0')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
+fn get_genres(tag: &Tag) -> Vec<String> {
+    tag.get_strings(ItemKey::Genre).map(Into::into).collect()
+}
+
+fn get_date(tag: &Tag) -> Option<String> {
+    tag.get_string(ItemKey::RecordingDate)
+        .or_else(|| tag.get_string(ItemKey::Year))
         .map(Into::into)
 }
 
-fn process_metadata(scan: &mut TrackScan, tag: &Tag) {
-    use StandardTagKey::*;
-    match (tag.std_key, &tag.key, &tag.value) {
-        (Some(TrackTitle), _, Value::String(title)) => {
-            scan.name = Some(title.into());
-        }
-        (Some(Artist), _, Value::String(artist)) => {
-            scan.artist = Some(artist.into());
-        }
-        (Some(Album), _, Value::String(album)) => {
-            scan.album = Some(album.into());
-        }
-        (Some(Date), _, Value::String(date)) => {
-            scan.date = Some(date.into());
-        }
+fn get_album(ctx: &JobContext, tag: &Tag) -> Option<AlbumId> {
+    //TODO: Support not having an mbid
+    let mbid = tag.get_string(ItemKey::MusicBrainzReleaseId)?;
 
-        (Some(TrackNumber), _, Value::UnsignedInt(track_number)) => {
-            scan.track_number = Some(*track_number);
-        }
-        (Some(TrackNumber), _, Value::String(track_number))
-            if let Ok(track_number) = track_number.parse() =>
-        {
-            scan.track_number = Some(track_number);
-        }
+    let Ok(mbid) = MusicBrainzId::parse_str(mbid) else {
+        return None;
+    };
 
-        (Some(Genre), _, Value::String(genres)) => {
-            scan.genres.extend(split_multi_tag(genres));
-        }
-
-        (Some(MusicBrainzRecordingId), _, Value::String(mbid)) => {
-            scan.mbid = Some(mbid.into());
-        }
-        (Some(MusicBrainzAlbumId), _, Value::String(mbid)) => {
-            scan.album_mbid = Some(mbid.into());
-        }
-        (Some(MusicBrainzArtistId), _, Value::String(mbids)) => {
-            scan.artist_mbids.extend(split_multi_tag(mbids));
-        }
-        _ => (),
+    if let Some(id) = ctx.read_db(|db| db.lookup_album_by_mbid(&mbid)) {
+        return Some(id);
     }
+
+    let name = tag.album().map(Into::into);
+    let artists = get_artists(ctx, tag, true);
+    let artists_text = tag.get_string(ItemKey::AlbumArtist).map(Into::into);
+    let genres = get_genres(tag);
+    let date = get_date(tag);
+    let track_count = tag.track_total();
+
+    let album = ctx.write_db(|db| {
+        db.insert_album(AlbumData {
+            mbid: Some(mbid),
+            name,
+            artists,
+            artists_text,
+            genres,
+            date,
+            track_count,
+            ..Default::default()
+        })
+    });
+
+    ctx.spawn_detatched(musicbrainz::fetch_release(ctx.clone(), mbid));
+
+    Some(album)
 }
 
-//pub async fn scan_file_path(ctx: JobContext, path: PathBuf) {}
+async fn load_track_file(ctx: JobContext, path: PathBuf) -> Result<TrackId, LoadTrackError> {
+    let (duration, Some(ref tag)) = parse_file_tags(path).await? else {
+        return Err(LoadTrackError::MissingMbid);
+    };
+
+    //TODO: Support not having an mbid
+    let mbid = tag
+        .get_string(ItemKey::MusicBrainzRecordingId)
+        .ok_or(LoadTrackError::MissingMbid)?;
+
+    let Ok(mbid) = MusicBrainzId::parse_str(mbid) else {
+        return Err(LoadTrackError::MissingMbid);
+    };
+
+    if let Some(id) = ctx.read_db(|db| db.lookup_track_by_mbid(&mbid)) {
+        return Ok(id);
+    }
+
+    let name = tag.title().map(Into::into);
+    let artists = get_artists(&ctx, tag, false);
+    let artists_text = tag.get_string(ItemKey::TrackArtist).map(Into::into);
+    let album = get_album(&ctx, tag);
+    let track_number = tag.track_total();
+    let genres = get_genres(tag);
+    let date = get_date(tag);
+
+    let track = ctx.write_db(|db| {
+        db.insert_track(TrackData {
+            mbid: Some(mbid),
+            name,
+            artists,
+            artists_text,
+            album,
+            track_number,
+            genres,
+            date,
+            length: Some(duration),
+            ..Default::default()
+        })
+    });
+
+    ctx.spawn_detatched(musicbrainz::fetch_recording(ctx.clone(), mbid));
+
+    Ok(track)
+}
+
+async fn search_directory(ctx: JobContext, path: PathBuf) -> Vec<(PathBuf, LoadTrackError)> {
+    let mut entries = match smol::fs::read_dir(&path).await {
+        Ok(files) => files,
+        Err(error) => {
+            return vec![(path, error.into())];
+        }
+    };
+
+    let mut errors = Vec::new();
+    let mut futures = Vec::new();
+
+    while let Some(entry) = entries.next().await {
+        let entry_path = match entry {
+            Ok(entry) => entry.path(),
+            Err(error) => {
+                errors.push((path.clone(), error.into()));
+                continue;
+            }
+        };
+
+        futures.push(ctx.spawn(search_file_or_directory(ctx.clone(), entry_path)));
+    }
+
+    for fut in futures {
+        errors.extend(fut.await);
+    }
+
+    errors
+}
+
+fn search_file_or_directory(
+    ctx: JobContext,
+    path: PathBuf,
+) -> impl Future<Output = Vec<(PathBuf, LoadTrackError)>> + Send {
+    Box::pin(async move {
+        let metadata = match smol::fs::metadata(&path).await {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                return vec![(path, error.into())];
+            }
+        };
+
+        if metadata.is_dir() {
+            search_directory(ctx, path).await
+        } else {
+            match load_track_file(ctx, path.clone()).await {
+                Ok(_) => Vec::new(),
+                Err(error) => vec![(path, error)],
+            }
+        }
+    })
+}
+
+pub async fn load_tracks_from_path(ctx: JobContext, path: PathBuf) {
+    search_file_or_directory(ctx, path).await;
+}

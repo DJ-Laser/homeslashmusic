@@ -6,7 +6,7 @@ slotmap::new_key_type! {
     pub struct ArtistId;
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ArtistData {
     /// The `MusicBrainzId` for this artist
     pub mbid: Option<MusicBrainzId>,
@@ -16,7 +16,7 @@ pub struct ArtistData {
     pub tracks: Vec<TrackId>,
 
     /// Name of the artist
-    pub name: String,
+    pub name: Option<String>,
     /// Profile image for the artist
     pub image: Option<ResourceLocation>,
     /// The genres associated with this artist, sorted by relevance
