@@ -4,8 +4,7 @@ use serde::{Deserialize, Serialize};
 use slotmap::DenseSlotMap;
 
 use crate::database::store::{
-    ArtistData, ArtistId, DatabaseStore, MissingDatabaseId, MusicBrainzId, ResourceLocation,
-    TrackId,
+    ArtistData, ArtistId, DatabaseStore, MissingDatabaseId, MusicBrainzId, TrackId,
 };
 
 slotmap::new_key_type! {
@@ -31,15 +30,13 @@ impl DerivedSongData {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SongData {
     /// The `MusicBrainzId` for this song
-    pub mbid: Option<MusicBrainzId>,
+    pub mbid: MusicBrainzId,
     /// Song data derrived other database entries
     #[serde(skip)]
     pub derived: DerivedSongData,
 
     /// Name of the song
     pub title: Option<String>,
-    /// Cover art for the song
-    pub image: Option<ResourceLocation>,
     /// The length of this song
     pub length: Option<Duration>,
     /// The date this song was released
@@ -62,7 +59,7 @@ impl DatabaseStore {
         self.songs.get(id).ok_or(MissingDatabaseId::Song(id))
     }
 
-    pub fn lookup_song_by_mbid(&self, mbid: &MusicBrainzId) -> Option<SongId> {
+    pub fn lookup_song(&self, mbid: &MusicBrainzId) -> Option<SongId> {
         self.song_by_mbid.get(mbid).copied()
     }
 
@@ -87,9 +84,7 @@ impl DatabaseStore {
 
     pub fn insert_song(&mut self, song: SongData) -> SongId {
         self.songs.insert_with_key(|id| {
-            if let Some(mbid) = song.mbid {
-                self.song_by_mbid.insert(mbid, id);
-            }
+            self.song_by_mbid.insert(song.mbid, id);
 
             Self::update_song_links(&mut self.artists, id, &song, false);
 
@@ -97,13 +92,8 @@ impl DatabaseStore {
         })
     }
 
-    pub fn update_or_insert_song_by_mbid(
-        &mut self,
-        mbid: MusicBrainzId,
-        mut song: SongData,
-    ) -> Result<SongId, MissingDatabaseId> {
-        let Some(id) = self.lookup_song_by_mbid(&mbid) else {
-            song.mbid = Some(mbid);
+    pub fn update_or_insert_song(&mut self, song: SongData) -> Result<SongId, MissingDatabaseId> {
+        let Some(id) = self.lookup_song(&song.mbid) else {
             return Ok(self.insert_song(song));
         };
 
@@ -113,7 +103,6 @@ impl DatabaseStore {
         Self::update_song_links(&mut self.artists, id, &song, false);
 
         db_song.title = song.title;
-        db_song.image = song.image;
         db_song.artists = song.artists;
         db_song.artists_text = song.artists_text;
         db_song.genres = song.genres;

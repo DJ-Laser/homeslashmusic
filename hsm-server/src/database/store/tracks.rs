@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 use slotmap::DenseSlotMap;
 
 use crate::database::store::{
-    AlbumData, AlbumId, DatabaseStore, MissingDatabaseId, ResourceLocation, SongData, SongId,
+    DatabaseStore, MissingDatabaseId, ResourceLocation, SongData, SongId, TrackGroupData,
+    TrackGroupId,
 };
 
 slotmap::new_key_type! {
@@ -16,7 +17,7 @@ pub struct DerivedTrackData {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrackData {
-    /// Locatation of this track's audio data
+    /// The location of this track's audio data
     pub location: ResourceLocation,
     /// Track data derrived other database entries
     #[serde(skip)]
@@ -24,8 +25,8 @@ pub struct TrackData {
 
     /// The song this track is audio for
     pub song: Option<SongId>,
-    // The album this track is in
-    pub album: Option<AlbumId>,
+    // The track group this track is in
+    pub track_group: Option<TrackGroupId>,
 
     /// The name of this track
     pub title: Option<String>,
@@ -46,7 +47,7 @@ impl DatabaseStore {
 
     pub(super) fn update_track_links(
         songs: &mut DenseSlotMap<SongId, SongData>,
-        albums: &mut DenseSlotMap<AlbumId, AlbumData>,
+        track_groups: &mut DenseSlotMap<TrackGroupId, TrackGroupData>,
         id: TrackId,
         track: &TrackData,
         remove: bool,
@@ -61,13 +62,16 @@ impl DatabaseStore {
             }
         }
 
-        if let Some(album_id) = track.album
-            && let Some(album) = albums.get_mut(album_id)
+        if let Some(track_group_id) = track.track_group
+            && let Some(track_group) = track_groups.get_mut(track_group_id)
         {
             if remove {
-                album.derived.tracks.retain(|stored_id| *stored_id != id);
-            } else if !album.derived.tracks.contains(&id) {
-                album.derived.tracks.push(id);
+                track_group
+                    .derived
+                    .tracks
+                    .retain(|stored_id| *stored_id != id);
+            } else if !track_group.derived.tracks.contains(&id) {
+                track_group.derived.tracks.push(id);
             }
         }
     }
@@ -76,7 +80,7 @@ impl DatabaseStore {
         self.tracks.insert_with_key(|id| {
             self.track_by_location.insert(track.location.clone(), id);
 
-            Self::update_track_links(&mut self.songs, &mut self.albums, id, &track, false);
+            Self::update_track_links(&mut self.songs, &mut self.track_groups, id, &track, false);
 
             track
         })
@@ -95,11 +99,12 @@ impl DatabaseStore {
             .get_mut(id)
             .ok_or(MissingDatabaseId::Track(id))?;
 
-        Self::update_track_links(&mut self.songs, &mut self.albums, id, db_track, true);
-        Self::update_track_links(&mut self.songs, &mut self.albums, id, &track, false);
+        Self::update_track_links(&mut self.songs, &mut self.track_groups, id, db_track, true);
+        Self::update_track_links(&mut self.songs, &mut self.track_groups, id, &track, false);
 
         db_track.song = track.song;
-        db_track.album = track.album;
+        db_track.track_group = track.track_group;
+
         db_track.title = track.title;
         db_track.length = track.length;
         db_track.track_number = track.track_number;

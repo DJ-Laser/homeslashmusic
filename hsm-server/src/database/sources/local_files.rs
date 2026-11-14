@@ -12,8 +12,8 @@ use crate::database::{
     sources::musicbrainz,
     store::{
         AlbumData, AlbumId, ArtistData, ArtistId, DerivedAlbumData, DerivedArtistData,
-        DerivedSongData, DerivedTrackData, MissingDatabaseId, MusicBrainzId, ResourceLocation,
-        SongData, SongId, TrackData, TrackId,
+        DerivedSongData, DerivedTrackData, DerivedTrackGroupData, MissingDatabaseId, MusicBrainzId,
+        ResourceLocation, SongData, SongId, TrackData, TrackGroupData, TrackGroupId, TrackId,
     },
 };
 
@@ -27,11 +27,11 @@ pub enum LoadFileError {
     #[error("{0}")]
     ParseFailed(#[from] lofty::error::FileParseError),
 
-    #[error("song missing MusicBrainz id")]
-    MissingMbid,
-
     #[error("{0}")]
     Database(#[from] MissingDatabaseId),
+
+    #[error("File had no metadata to parse")]
+    MissingTags,
 }
 
 /// Load a `song` from a specified file path
@@ -88,7 +88,6 @@ fn get_artists(ctx: &JobContext, tag: &Tag, album: bool) -> Vec<ArtistId> {
 
                 name: name.map(Into::into),
                 sort_name: None,
-                image: None,
                 genres: Vec::new(),
             });
 
@@ -127,41 +126,6 @@ fn get_date(tag: &Tag) -> Option<String> {
         .map(Into::into)
 }
 
-fn get_album(ctx: &JobContext, tag: &Tag) -> Option<AlbumId> {
-    //TODO: Support not having an mbid
-    let mbid = MusicBrainzId::parse_str(tag.get_string(ItemKey::MusicBrainzReleaseId)?).ok()?;
-
-    if let Some(id) = ctx.read_db(|db| db.lookup_album_by_mbid(&mbid)) {
-        return Some(id);
-    }
-
-    let name = tag.album().map(Into::into);
-    let artists = get_artists(ctx, tag, true);
-    let artists_text = tag.get_string(ItemKey::AlbumArtist).map(Into::into);
-    let genres = get_genres(tag);
-    let date = get_date(tag);
-    let song_count = tag.track_total();
-
-    let album = ctx.write_db(|db| {
-        db.insert_album(AlbumData {
-            mbid: Some(mbid),
-            derived: DerivedAlbumData::default(),
-
-            title: name,
-            image: None,
-            artists,
-            artists_text,
-            genres,
-            date,
-            track_count: song_count,
-        })
-    });
-
-    ctx.spawn_detatched(musicbrainz::fetch_release(ctx.clone(), mbid));
-
-    Some(album)
-}
-
 fn parse_song_length(input: &str) -> Option<Duration> {
     let mut parts = input.trim().rsplit(':');
 
@@ -184,14 +148,13 @@ fn parse_song_length(input: &str) -> Option<Duration> {
 }
 
 fn get_song(ctx: &JobContext, tag: &Tag) -> Option<SongId> {
-    //TODO: Support not having an mbid
     let mbid = MusicBrainzId::parse_str(tag.get_string(ItemKey::MusicBrainzRecordingId)?).ok()?;
 
-    if let Some(id) = ctx.read_db(|db| db.lookup_song_by_mbid(&mbid)) {
+    if let Some(id) = ctx.read_db(|db| db.lookup_song(&mbid)) {
         return Some(id);
     }
 
-    let name = tag.title().map(Into::into);
+    let title = tag.title().map(Into::into);
     let artists = get_artists(ctx, tag, false);
     let artists_text = tag.get_string(ItemKey::TrackArtist).map(Into::into);
     let genres = get_genres(tag);
@@ -200,11 +163,10 @@ fn get_song(ctx: &JobContext, tag: &Tag) -> Option<SongId> {
 
     let song = ctx.write_db(|db| {
         db.insert_song(SongData {
-            mbid: Some(mbid),
+            mbid,
             derived: DerivedSongData::default(),
 
-            title: name,
-            image: None,
+            title,
             length,
             date,
             genres,
@@ -221,6 +183,69 @@ fn get_song(ctx: &JobContext, tag: &Tag) -> Option<SongId> {
     Some(song)
 }
 
+fn get_album(ctx: &JobContext, tag: &Tag) -> Option<AlbumId> {
+    let mbid =
+        MusicBrainzId::parse_str(tag.get_string(ItemKey::MusicBrainzReleaseGroupId)?).ok()?;
+
+    if let Some(id) = ctx.read_db(|db| db.lookup_album(&mbid)) {
+        return Some(id);
+    }
+
+    let title = tag.album().map(Into::into);
+    let artists = get_artists(ctx, tag, true);
+    let artists_text = tag.get_string(ItemKey::AlbumArtist).map(Into::into);
+    let genres = get_genres(tag);
+    let date = get_date(tag);
+
+    let album = ctx.write_db(|db| {
+        db.insert_album(AlbumData {
+            mbid,
+            derived: DerivedAlbumData::default(),
+
+            title,
+            artists,
+            artists_text,
+            genres,
+            date,
+        })
+    });
+
+    ctx.spawn_detatched(musicbrainz::fetch_release_group(ctx.clone(), mbid));
+
+    Some(album)
+}
+
+fn get_track_group(ctx: &JobContext, tag: &Tag) -> Option<TrackGroupId> {
+    let title: String = tag.album().map(Into::into)?;
+
+    let location = ResourceLocation {
+        plugin: PLUGIN_ID.into(),
+        id: title.clone(),
+    };
+
+    if let Some(id) = ctx.read_db(|db| db.lookup_track_group(&location)) {
+        return Some(id);
+    }
+
+    let album = get_album(ctx, tag);
+
+    let track_count = tag.track_total();
+
+    let album = ctx.write_db(|db| {
+        db.insert_track_group(TrackGroupData {
+            location,
+            derived: DerivedTrackGroupData::default(),
+
+            album,
+
+            title: Some(title),
+            track_count,
+        })
+    });
+
+    Some(album)
+}
+
 async fn load_song_file(ctx: JobContext, path: PathBuf) -> Result<TrackId, LoadFileError> {
     let location = ResourceLocation {
         plugin: PLUGIN_ID.into(),
@@ -228,11 +253,11 @@ async fn load_song_file(ctx: JobContext, path: PathBuf) -> Result<TrackId, LoadF
     };
 
     let (length, Some(ref tag)) = parse_file_tags(path).await? else {
-        return Err(LoadFileError::MissingMbid);
+        return Err(LoadFileError::MissingTags);
     };
 
     let song = get_song(&ctx, tag);
-    let album = get_album(&ctx, tag);
+    let track_group = get_track_group(&ctx, tag);
 
     let title = tag.title().map(Into::into);
     let track_number = tag.track();
@@ -243,7 +268,7 @@ async fn load_song_file(ctx: JobContext, path: PathBuf) -> Result<TrackId, LoadF
             derived: DerivedTrackData::default(),
 
             song,
-            album,
+            track_group,
 
             title,
             length,

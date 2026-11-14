@@ -1,8 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::database::store::{
-    AlbumId, DatabaseStore, MissingDatabaseId, MusicBrainzId, ResourceLocation, SongId,
-};
+use crate::database::store::{AlbumId, DatabaseStore, MissingDatabaseId, MusicBrainzId, SongId};
 
 slotmap::new_key_type! {
     pub struct ArtistId;
@@ -43,8 +41,6 @@ pub struct ArtistData {
     pub name: Option<String>,
     /// Sorting key for the artist
     pub sort_name: Option<String>,
-    /// Profile image for the artist
-    pub image: Option<ResourceLocation>,
     /// The genres associated with this artist, sorted by relevance
     pub genres: Vec<String>,
 }
@@ -85,7 +81,6 @@ impl DatabaseStore {
 
         db_artist.name = artist.name;
         db_artist.sort_name = artist.sort_name;
-        db_artist.image = artist.image;
         db_artist.genres = artist.genres;
 
         Ok(id)

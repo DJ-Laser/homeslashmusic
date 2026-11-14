@@ -2,8 +2,7 @@ use serde::{Deserialize, Serialize};
 use slotmap::DenseSlotMap;
 
 use crate::database::store::{
-    ArtistData, ArtistId, DatabaseStore, MissingDatabaseId, MusicBrainzId, ResourceLocation,
-    TrackId,
+    ArtistData, ArtistId, DatabaseStore, MissingDatabaseId, MusicBrainzId, TrackGroupId,
 };
 
 slotmap::new_key_type! {
@@ -12,38 +11,34 @@ slotmap::new_key_type! {
 
 #[derive(Debug, Clone, Default)]
 pub struct DerivedAlbumData {
-    pub(super) tracks: Vec<TrackId>,
+    pub(super) track_groups: Vec<TrackGroupId>,
 }
 
 impl DerivedAlbumData {
     /// Tracks in this album
-    pub fn songs(&self) -> &Vec<TrackId> {
-        &self.tracks
+    pub fn songs(&self) -> &Vec<TrackGroupId> {
+        &self.track_groups
     }
 
     pub(super) fn clear(&mut self) {
-        self.tracks.clear();
+        self.track_groups.clear();
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AlbumData {
     /// The `MusicBrainzId` for this album
-    pub mbid: Option<MusicBrainzId>,
+    pub mbid: MusicBrainzId,
     /// Album data derrived other database entries
     #[serde(skip)]
     pub derived: DerivedAlbumData,
 
     /// Name of the album
     pub title: Option<String>,
-    /// Cover art for the album
-    pub image: Option<ResourceLocation>,
     /// The date this album was released
     pub date: Option<String>,
     /// The genres associated with this album, sorted by relevance
     pub genres: Vec<String>,
-    /// The total number of tracks included in this album
-    pub track_count: Option<u32>,
 
     /// Artists assocated with this album, sorted as they appear on the album metadata
     pub artists: Vec<ArtistId>,
@@ -56,15 +51,13 @@ impl DatabaseStore {
         self.albums.get(id).ok_or(MissingDatabaseId::Album(id))
     }
 
-    pub fn lookup_album_by_mbid(&self, mbid: &MusicBrainzId) -> Option<AlbumId> {
+    pub fn lookup_album(&self, mbid: &MusicBrainzId) -> Option<AlbumId> {
         self.album_by_mbid.get(mbid).copied()
     }
 
     pub fn insert_album(&mut self, album: AlbumData) -> AlbumId {
         self.albums.insert_with_key(|id| {
-            if let Some(mbid) = album.mbid {
-                self.album_by_mbid.insert(mbid, id);
-            }
+            self.album_by_mbid.insert(album.mbid, id);
 
             Self::update_album_links(&mut self.artists, id, &album, false);
 
@@ -91,13 +84,11 @@ impl DatabaseStore {
         }
     }
 
-    pub fn update_or_insert_album_by_mbid(
+    pub fn update_or_insert_album(
         &mut self,
-        mbid: MusicBrainzId,
-        mut album: AlbumData,
+        album: AlbumData,
     ) -> Result<AlbumId, MissingDatabaseId> {
-        let Some(id) = self.lookup_album_by_mbid(&mbid) else {
-            album.mbid = Some(mbid);
+        let Some(id) = self.lookup_album(&album.mbid) else {
             return Ok(self.insert_album(album));
         };
 
@@ -110,12 +101,10 @@ impl DatabaseStore {
         Self::update_album_links(&mut self.artists, id, &album, false);
 
         db_album.title = album.title;
-        db_album.image = album.image;
         db_album.artists = album.artists;
         db_album.artists_text = album.artists_text;
         db_album.genres = album.genres;
         db_album.date = album.date;
-        db_album.track_count = album.track_count;
 
         Ok(id)
     }

@@ -1,6 +1,9 @@
+use hsm_ipc::TrackId;
 use serde::{Deserialize, Serialize};
 
-use crate::database::store::{AlbumId, DatabaseStore, MissingDatabaseId, ResourceLocation, SongId};
+use crate::database::store::{
+    AlbumId, DatabaseStore, MissingDatabaseId, ResourceLocation, SongId, TrackGroupId,
+};
 
 slotmap::new_key_type! {
     pub struct PlaylistId;
@@ -8,8 +11,15 @@ slotmap::new_key_type! {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PlaylistEntry {
+    /// Play the specified track
+    Track(TrackId),
+    /// Play the preferred track for the song
     Song(SongId),
+    /// Play the specified track group
+    TrackGroup(TrackGroupId),
+    /// Play the preferred track group for the album
     Album(AlbumId),
+    /// Play the contents of the playlist
     Playlist(PlaylistId),
 }
 

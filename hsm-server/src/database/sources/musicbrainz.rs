@@ -9,7 +9,7 @@ use musicbrainz_rs::{
         genre::Genre,
         recording::Recording,
         relations::{Relation, RelationContent},
-        release::Release,
+        release_group::ReleaseGroup,
     },
 };
 use thiserror::Error;
@@ -104,7 +104,6 @@ fn insert_artist(
 
         name: Some(mb_artist.name),
         sort_name: Some(mb_artist.sort_name),
-        image: None,
         genres: get_genres(mb_artist.genres),
     };
 
@@ -167,30 +166,24 @@ fn get_artists(
 fn insert_album(
     db: &mut DatabaseStore,
     mbid: MusicBrainzId,
-    mb_release: Release,
+    mb_release_group: ReleaseGroup,
     is_complete: bool,
 ) -> Result<AlbumId, MissingDatabaseId> {
-    let (artists, artists_text) = get_artists(db, mb_release.artist_credit)?;
-
-    let song_count = mb_release
-        .media
-        .map(|media| media.iter().map(|medium| medium.track_count).sum());
+    let (artists, artists_text) = get_artists(db, mb_release_group.artist_credit)?;
 
     let album = AlbumData {
-        mbid: None,
+        mbid,
         derived: DerivedAlbumData::default(),
 
-        title: Some(mb_release.title),
-        image: None,
-        date: mb_release.date.map(Into::into),
-        genres: get_genres(mb_release.genres),
-        track_count: song_count,
+        title: Some(mb_release_group.title),
+        date: mb_release_group.first_release_date.map(Into::into),
+        genres: get_genres(mb_release_group.genres),
 
         artists,
         artists_text,
     };
 
-    let id = db.update_or_insert_album_by_mbid(mbid, album)?;
+    let id = db.update_or_insert_album(album)?;
     if is_complete {
         db.complete_mbid_query(mbid);
     }
@@ -198,18 +191,15 @@ fn insert_album(
     Ok(id)
 }
 
-pub async fn fetch_release(
+pub async fn fetch_release_group(
     ctx: JobContext,
     mbid: MusicBrainzId,
 ) -> Result<(), MusicBrainzFetchError> {
     let guard = insert_pending_query(&ctx, mbid)?;
-    let mb_release = fetch_rate_limited(
-        &mbid,
-        Release::fetch().with_genres().with_artists().with_media(),
-    )
-    .await?;
+    let mb_release_group =
+        fetch_rate_limited(&mbid, ReleaseGroup::fetch().with_genres().with_artists()).await?;
 
-    ctx.write_db(|db| insert_album(db, mbid, mb_release, true))?;
+    ctx.write_db(|db| insert_album(db, mbid, mb_release_group, true))?;
     DropGuard::dismiss(guard);
 
     Ok(())
@@ -226,11 +216,10 @@ fn insert_song(
     let mix_songs = get_mix_songs(db, mb_recording.relations)?;
 
     let song = SongData {
-        mbid: None,
+        mbid,
         derived: DerivedSongData::default(),
 
         title: Some(mb_recording.title),
-        image: None,
         length: mb_recording
             .length
             .map(|ms| Duration::from_millis(u64::from(ms))),
@@ -243,7 +232,7 @@ fn insert_song(
         mix_songs,
     };
 
-    let id = db.update_or_insert_song_by_mbid(mbid, song)?;
+    let id = db.update_or_insert_song(song)?;
     if is_complete {
         db.complete_mbid_query(mbid);
     }
@@ -275,7 +264,7 @@ fn get_mix_songs(
             };
 
             let id = db
-                .lookup_song_by_mbid(&mbid)
+                .lookup_song(&mbid)
                 .map_or_else(|| insert_song(db, mbid, *mix_recording, false), Ok)?;
 
             Ok(Some(id))
