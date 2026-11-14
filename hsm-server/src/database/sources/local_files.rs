@@ -9,7 +9,7 @@ use thiserror::Error;
 
 use crate::database::{
     jobs::JobContext,
-    sources::{ArtistLocation, TrackGroupLocation, TrackLocation, musicbrainz},
+    sources::{ArtistLocation, TrackGroupLocation, TrackLocation},
     store::{
         AlbumData, AlbumId, ArtistData, ArtistId, DerivedAlbumData, DerivedArtistData,
         DerivedSongData, DerivedTrackData, DerivedTrackGroupData, MissingDatabaseId, MusicBrainzId,
@@ -33,7 +33,7 @@ pub enum LoadFileError {
 }
 
 /// Load a `song` from a specified file path
-pub async fn parse_file_tags(path: PathBuf) -> Result<(Duration, Option<Tag>), LoadFileError> {
+async fn parse_file_tags(path: PathBuf) -> Result<(Duration, Option<Tag>), LoadFileError> {
     smol::unblock(move || {
         let mut tagged_file = lofty::read_from_path(path)?;
 
@@ -102,7 +102,6 @@ fn get_artists(ctx: &JobContext, tag: &Tag, album: bool) -> Vec<ArtistId> {
             });
 
             artists.push(id);
-            ctx.spawn_detatched(musicbrainz::fetch_artist(ctx.clone(), mbid));
         };
 
         if names.is_empty() && mbids.len() == 1 {
@@ -188,8 +187,6 @@ fn get_song(ctx: &JobContext, tag: &Tag) -> Option<SongId> {
         })
     });
 
-    ctx.spawn_detatched(musicbrainz::fetch_recording(ctx.clone(), mbid));
-
     Some(song)
 }
 
@@ -219,8 +216,6 @@ fn get_album(ctx: &JobContext, tag: &Tag) -> Option<AlbumId> {
             date,
         })
     });
-
-    ctx.spawn_detatched(musicbrainz::fetch_release_group(ctx.clone(), mbid));
 
     Some(album)
 }

@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use std::{
+    io::Write as _,
     path::PathBuf,
     sync::{Arc, RwLock},
     time::Duration,
@@ -37,9 +38,16 @@ impl MusicDatabase {
 
         self.executor
             .spawn(async move {
+                print!("Loading local files...");
+                let _ = std::io::stdout().flush();
                 sources::local_files::load_all_from_path(ctx.clone(), path).await;
+                println!("Done!");
+
+                print!("Waiting 10 seconds for api requests...");
+                let _ = std::io::stdout().flush();
 
                 smol::Timer::after(Duration::from_secs(10)).await;
+                println!("Done!");
 
                 ctx.read_db(DatabaseStore::print_contents);
             })

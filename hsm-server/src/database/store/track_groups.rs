@@ -5,7 +5,9 @@ use slotmap::DenseSlotMap;
 
 use crate::database::{
     sources::TrackGroupLocation,
-    store::{AlbumData, AlbumId, ArtistId, DatabaseStore, Lookup, MissingDatabaseId, TrackId},
+    store::{
+        AlbumData, AlbumId, ArtistData, ArtistId, DatabaseStore, Lookup, MissingDatabaseId, TrackId,
+    },
 };
 
 slotmap::new_key_type! {
@@ -66,7 +68,13 @@ impl DatabaseStore {
             self.lookup
                 .insert_track_group(track_group.location.clone(), id);
 
-            Self::update_track_group_links(&mut self.albums, id, &track_group, false);
+            Self::update_track_group_links(
+                &mut self.albums,
+                &mut self.artists,
+                id,
+                &track_group,
+                false,
+            );
 
             track_group
         })
@@ -74,6 +82,7 @@ impl DatabaseStore {
 
     pub(super) fn update_track_group_links(
         albums: &mut DenseSlotMap<AlbumId, AlbumData>,
+        artists: &mut DenseSlotMap<ArtistId, ArtistData>,
         id: TrackGroupId,
         track_group: &TrackGroupData,
         remove: bool,
@@ -88,6 +97,21 @@ impl DatabaseStore {
                     .retain(|stored_id| *stored_id != id);
             } else if !album.derived.track_groups.contains(&id) {
                 album.derived.track_groups.push(id);
+            }
+        }
+
+        for artist_id in &track_group.artists {
+            let Some(artist) = artists.get_mut(*artist_id) else {
+                continue;
+            };
+
+            if remove {
+                artist
+                    .derived
+                    .track_groups
+                    .retain(|stored_id| *stored_id != id);
+            } else if !artist.derived.track_groups.contains(&id) {
+                artist.derived.track_groups.push(id);
             }
         }
     }
@@ -105,7 +129,13 @@ impl DatabaseStore {
             .get_mut(id)
             .ok_or(MissingDatabaseId::TrackGroup(id))?;
 
-        Self::update_track_group_links(&mut self.albums, id, db_track_group, true);
+        Self::update_track_group_links(
+            &mut self.albums,
+            &mut self.artists,
+            id,
+            db_track_group,
+            true,
+        );
 
         *db_track_group = TrackGroupData {
             location: mem::replace(&mut db_track_group.location, track_group.location),
@@ -113,7 +143,13 @@ impl DatabaseStore {
             ..track_group
         };
 
-        Self::update_track_group_links(&mut self.albums, id, db_track_group, false);
+        Self::update_track_group_links(
+            &mut self.albums,
+            &mut self.artists,
+            id,
+            db_track_group,
+            false,
+        );
 
         Ok(id)
     }

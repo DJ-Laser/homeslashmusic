@@ -1,4 +1,4 @@
-use std::{mem::DropGuard, num::NonZeroU32, sync::LazyLock, time::Duration};
+use std::{num::NonZeroU32, sync::LazyLock, time::Duration};
 
 use governor::{Jitter, Quota, RateLimiter};
 use musicbrainz_rs::{
@@ -71,19 +71,6 @@ where
         .map_err(Into::into)
 }
 
-fn insert_pending_query(
-    ctx: &JobContext,
-    mbid: MusicBrainzId,
-) -> Result<DropGuard<(), impl FnOnce(())>, MusicBrainzFetchError> {
-    ctx.write_db(|db| db.claim_mbid_query(mbid))
-        .map(|()| {
-            DropGuard::new((), move |()| {
-                ctx.write_db(|db| db.fail_mbid_query(mbid));
-            })
-        })
-        .map_err(MusicBrainzFetchError::PendingQuery)
-}
-
 fn get_genres(genres: Option<Vec<Genre>>) -> Vec<String> {
     genres
         .into_iter()
@@ -117,14 +104,12 @@ fn insert_artist(
 }
 
 pub async fn fetch_artist(
-    ctx: JobContext,
+    ctx: &JobContext,
     mbid: MusicBrainzId,
 ) -> Result<(), MusicBrainzFetchError> {
-    let guard = insert_pending_query(&ctx, mbid)?;
     let mb_artist = fetch_rate_limited(&mbid, Artist::fetch().with_genres()).await?;
 
     ctx.write_db(|db| insert_artist(db, mbid, mb_artist, true))?;
-    DropGuard::dismiss(guard);
 
     Ok(())
 }
@@ -141,7 +126,7 @@ fn get_artists(
     let mut artists_text = String::new();
 
     for credit in artist_credits {
-        artists_text.push_str(&credit.artist.name);
+        artists_text.push_str(&credit.name);
         if let Some(join_phrase) = credit.joinphrase {
             artists_text.push_str(&join_phrase);
         }
@@ -193,15 +178,13 @@ fn insert_album(
 }
 
 pub async fn fetch_release_group(
-    ctx: JobContext,
+    ctx: &JobContext,
     mbid: MusicBrainzId,
 ) -> Result<(), MusicBrainzFetchError> {
-    let guard = insert_pending_query(&ctx, mbid)?;
     let mb_release_group =
         fetch_rate_limited(&mbid, ReleaseGroup::fetch().with_genres().with_artists()).await?;
 
     ctx.write_db(|db| insert_album(db, mbid, mb_release_group, true))?;
-    DropGuard::dismiss(guard);
 
     Ok(())
 }
@@ -275,10 +258,9 @@ fn get_mix_songs(
 }
 
 pub async fn fetch_recording(
-    ctx: JobContext,
+    ctx: &JobContext,
     mbid: MusicBrainzId,
 ) -> Result<(), MusicBrainzFetchError> {
-    let guard = insert_pending_query(&ctx, mbid)?;
     let mb_recording = fetch_rate_limited(
         &mbid,
         Recording::fetch()
@@ -289,7 +271,6 @@ pub async fn fetch_recording(
     .await?;
 
     ctx.write_db(|db| insert_song(db, mbid, mb_recording, true))?;
-    DropGuard::dismiss(guard);
 
     Ok(())
 }

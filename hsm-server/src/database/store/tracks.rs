@@ -6,8 +6,8 @@ use slotmap::DenseSlotMap;
 use crate::database::{
     sources::TrackLocation,
     store::{
-        ArtistId, DatabaseStore, Lookup, MissingDatabaseId, SongData, SongId, TrackGroupData,
-        TrackGroupId,
+        ArtistData, ArtistId, DatabaseStore, Lookup, MissingDatabaseId, SongData, SongId,
+        TrackGroupData, TrackGroupId,
     },
 };
 
@@ -56,6 +56,7 @@ impl DatabaseStore {
     pub(super) fn update_track_links(
         songs: &mut DenseSlotMap<SongId, SongData>,
         track_groups: &mut DenseSlotMap<TrackGroupId, TrackGroupData>,
+        artists: &mut DenseSlotMap<ArtistId, ArtistData>,
         id: TrackId,
         track: &TrackData,
         remove: bool,
@@ -82,13 +83,32 @@ impl DatabaseStore {
                 track_group.derived.tracks.push(id);
             }
         }
+
+        for artist_id in &track.artists {
+            let Some(artist) = artists.get_mut(*artist_id) else {
+                continue;
+            };
+
+            if remove {
+                artist.derived.tracks.retain(|stored_id| *stored_id != id);
+            } else if !artist.derived.tracks.contains(&id) {
+                artist.derived.tracks.push(id);
+            }
+        }
     }
 
     fn insert_track(&mut self, track: TrackData) -> TrackId {
         self.tracks.insert_with_key(|id| {
             self.lookup.insert_track(track.location.clone(), id);
 
-            Self::update_track_links(&mut self.songs, &mut self.track_groups, id, &track, false);
+            Self::update_track_links(
+                &mut self.songs,
+                &mut self.track_groups,
+                &mut self.artists,
+                id,
+                &track,
+                false,
+            );
 
             track
         })
@@ -107,7 +127,14 @@ impl DatabaseStore {
             .get_mut(id)
             .ok_or(MissingDatabaseId::Track(id))?;
 
-        Self::update_track_links(&mut self.songs, &mut self.track_groups, id, db_track, true);
+        Self::update_track_links(
+            &mut self.songs,
+            &mut self.track_groups,
+            &mut self.artists,
+            id,
+            db_track,
+            true,
+        );
 
         *db_track = TrackData {
             location: mem::replace(&mut db_track.location, track.location),
@@ -115,7 +142,14 @@ impl DatabaseStore {
             ..track
         };
 
-        Self::update_track_links(&mut self.songs, &mut self.track_groups, id, db_track, false);
+        Self::update_track_links(
+            &mut self.songs,
+            &mut self.track_groups,
+            &mut self.artists,
+            id,
+            db_track,
+            false,
+        );
 
         Ok(id)
     }

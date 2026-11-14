@@ -1,9 +1,9 @@
+pub mod local_files;
+pub mod musicbrainz;
+
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
-
-pub mod local_files;
-mod musicbrainz;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TrackLocation {

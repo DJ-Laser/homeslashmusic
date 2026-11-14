@@ -6,7 +6,7 @@ mod songs;
 mod track_groups;
 mod tracks;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 use slotmap::DenseSlotMap;
@@ -76,9 +76,7 @@ pub struct DatabaseStore {
 
     #[serde(skip)]
     lookup: Lookup,
-
-    pending_mbids: HashSet<MusicBrainzId>,
-    failed_mbids: HashSet<MusicBrainzId>,
+    mbid_query_state: MbidQueryState,
 }
 
 impl DatabaseStore {
@@ -98,13 +96,26 @@ impl DatabaseStore {
 
         for (id, track) in &self.tracks {
             self.lookup.insert_track(track.location.clone(), id);
-            Self::update_track_links(&mut self.songs, &mut self.track_groups, id, track, false);
+            Self::update_track_links(
+                &mut self.songs,
+                &mut self.track_groups,
+                &mut self.artists,
+                id,
+                track,
+                false,
+            );
         }
 
         for (id, track_group) in &self.track_groups {
             self.lookup
                 .insert_track_group(track_group.location.clone(), id);
-            Self::update_track_group_links(&mut self.albums, id, track_group, false);
+            Self::update_track_group_links(
+                &mut self.albums,
+                &mut self.artists,
+                id,
+                track_group,
+                false,
+            );
         }
 
         for (id, playlist) in &self.playlists {
@@ -128,6 +139,7 @@ impl DatabaseStore {
     }
 
     pub fn print_contents(&self) {
+        println!();
         println!("##### TRACKS #####");
         println!();
         for (_, track) in &self.tracks {
@@ -137,8 +149,8 @@ impl DatabaseStore {
                 track.artists_text.as_deref().unwrap_or("Unknown Artist")
             );
         }
-        println!();
 
+        println!();
         println!("##### TRACK GROUPS #####");
         println!();
         for (_, track_group) in &self.track_groups {
@@ -155,8 +167,8 @@ impl DatabaseStore {
                 track_group.track_count.unwrap_or_default()
             );
         }
-        println!();
 
+        println!();
         println!("##### SONGS #####");
         println!();
         for (_, song) in &self.songs {
@@ -167,8 +179,8 @@ impl DatabaseStore {
                 song.mix_songs.len()
             );
         }
-        println!();
 
+        println!();
         println!("##### ALBUMS #####");
         println!();
         for (_, album) in &self.albums {
@@ -179,8 +191,8 @@ impl DatabaseStore {
                 album.derived.track_groups.len()
             );
         }
-        println!();
 
+        println!();
         println!("##### ARTISTS #####");
         println!();
         for (_, artist) in &self.artists {
@@ -191,12 +203,20 @@ impl DatabaseStore {
                 artist.derived.albums.len(),
             );
         }
-        println!();
 
-        println!("##### PENDING MBIDS #####");
         println!();
-        for mbid in &self.pending_mbids {
-            println!("{mbid}");
+        println!("##### INCOMPLETE MBIDS #####");
+        println!();
+        for mbid in self.mbid_query_state.incomplete.keys() {
+            if self.mbid_query_state.pending.contains_key(mbid) {
+                println!("{mbid} (pending)");
+            } else if self.mbid_query_state.failed.contains_key(mbid) {
+                println!("{mbid} (failed)");
+            } else {
+                println!("{mbid}");
+            }
         }
+
+        println!();
     }
 }

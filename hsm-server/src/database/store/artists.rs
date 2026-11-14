@@ -4,7 +4,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::database::{
     sources::ArtistLocation,
-    store::{AlbumId, DatabaseStore, Lookup, MissingDatabaseId, MusicBrainzId, SongId},
+    store::{
+        AlbumId, DatabaseStore, Lookup, MissingDatabaseId, MusicBrainzId, SongId, TrackGroupId,
+        TrackId,
+    },
 };
 
 slotmap::new_key_type! {
@@ -13,11 +16,23 @@ slotmap::new_key_type! {
 
 #[derive(Debug, Clone, Default)]
 pub struct DerivedArtistData {
+    pub(super) tracks: Vec<TrackId>,
+    pub(super) track_groups: Vec<TrackGroupId>,
     pub(super) songs: Vec<SongId>,
     pub(super) albums: Vec<AlbumId>,
 }
 
 impl DerivedArtistData {
+    /// Tracks by this artist, unsorted
+    pub fn tracks(&self) -> &Vec<TrackId> {
+        &self.tracks
+    }
+
+    /// Track Groups by this artist, unsorted
+    pub fn track_groups(&self) -> &Vec<TrackGroupId> {
+        &self.track_groups
+    }
+
     /// Songs by this artist, unsorted
     pub fn songs(&self) -> &Vec<SongId> {
         &self.songs
