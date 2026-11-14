@@ -3,6 +3,7 @@ mod artists;
 mod mbid;
 mod playlists;
 mod songs;
+mod tracks;
 
 use std::collections::{HashMap, HashSet};
 
@@ -15,44 +16,14 @@ pub use artists::*;
 pub use mbid::*;
 pub use playlists::*;
 pub use songs::*;
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-struct LookupMaps {
-    song_by_mbid: HashMap<MusicBrainzId, SongId>,
-    album_by_mbid: HashMap<MusicBrainzId, AlbumId>,
-    artist_by_mbid: HashMap<MusicBrainzId, ArtistId>,
-}
-
-impl LookupMaps {
-    fn update_song(&mut self, id: SongId, song: &SongData) {
-        if let Some(mbid) = song.mbid {
-            self.song_by_mbid.insert(mbid, id);
-        }
-    }
-
-    fn update_album(&mut self, id: AlbumId, album: &AlbumData) {
-        if let Some(mbid) = album.mbid {
-            self.album_by_mbid.insert(mbid, id);
-        }
-    }
-
-    fn update_artist(&mut self, id: ArtistId, artist: &ArtistData) {
-        if let Some(mbid) = artist.mbid {
-            self.artist_by_mbid.insert(mbid, id);
-        }
-    }
-
-    fn update_playlist(&mut self, id: PlaylistId, playlist: &PlaylistData) {
-        let _ = self;
-        let _ = id;
-        let _ = playlist;
-    }
-}
+pub use tracks::*;
 
 #[derive(Error, Debug)]
 pub enum MissingDatabaseId {
     #[error("Database does not contain key {0:?}")]
     Song(SongId),
+    #[error("Database does not contain key {0:?}")]
+    Track(TrackId),
     #[error("Database does not contain key {0:?}")]
     Album(AlbumId),
     #[error("Database does not contain key {0:?}")]
@@ -64,11 +35,14 @@ pub enum MissingDatabaseId {
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct DatabaseStore {
     songs: DenseSlotMap<SongId, SongData>,
+    tracks: DenseSlotMap<TrackId, TrackData>,
     albums: DenseSlotMap<AlbumId, AlbumData>,
     artists: DenseSlotMap<ArtistId, ArtistData>,
     playlists: DenseSlotMap<PlaylistId, PlaylistData>,
 
-    lookup: LookupMaps,
+    song_by_mbid: HashMap<MusicBrainzId, SongId>,
+    album_by_mbid: HashMap<MusicBrainzId, AlbumId>,
+    artist_by_mbid: HashMap<MusicBrainzId, ArtistId>,
     unqueried_mbids: HashSet<MusicBrainzId>,
 }
 

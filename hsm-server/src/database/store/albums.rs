@@ -1,9 +1,9 @@
-use std::collections::BTreeMap;
-
 use serde::{Deserialize, Serialize};
+use slotmap::DenseSlotMap;
 
 use crate::database::store::{
-    ArtistId, DatabaseStore, MissingDatabaseId, MusicBrainzId, ResourceLocation, SongId,
+    ArtistData, ArtistId, DatabaseStore, MissingDatabaseId, MusicBrainzId, ResourceLocation,
+    TrackId,
 };
 
 slotmap::new_key_type! {
@@ -12,13 +12,13 @@ slotmap::new_key_type! {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DerivedAlbumData {
-    songs: BTreeMap<u32, SongId>,
+    pub(super) tracks: Vec<TrackId>,
 }
 
 impl DerivedAlbumData {
-    /// songs and song numbers in this album
-    pub fn songs(&self) -> &BTreeMap<u32, SongId> {
-        &self.songs
+    /// Tracks in this album
+    pub fn songs(&self) -> &Vec<TrackId> {
+        &self.tracks
     }
 }
 
@@ -52,14 +52,38 @@ impl DatabaseStore {
     }
 
     pub fn lookup_album_by_mbid(&self, mbid: &MusicBrainzId) -> Option<AlbumId> {
-        self.lookup.album_by_mbid.get(mbid).copied()
+        self.album_by_mbid.get(mbid).copied()
     }
 
     pub fn insert_album(&mut self, album: AlbumData) -> AlbumId {
         self.albums.insert_with_key(|id| {
-            self.lookup.update_album(id, &album);
+            if let Some(mbid) = album.mbid {
+                self.album_by_mbid.insert(mbid, id);
+            }
+
+            Self::update_album_artists(&mut self.artists, id, &album, false);
+
             album
         })
+    }
+
+    fn update_album_artists(
+        artists: &mut DenseSlotMap<ArtistId, ArtistData>,
+        id: AlbumId,
+        album: &AlbumData,
+        remove: bool,
+    ) {
+        for artist_id in &album.artists {
+            let Some(artist) = artists.get_mut(*artist_id) else {
+                continue;
+            };
+
+            if remove {
+                artist.derived.albums.retain(|stored_id| id != *stored_id);
+            } else if !artist.derived.albums.contains(&id) {
+                artist.derived.albums.push(id);
+            }
+        }
     }
 
     pub fn update_or_insert_album_by_mbid(
@@ -76,6 +100,9 @@ impl DatabaseStore {
             .albums
             .get_mut(id)
             .ok_or(MissingDatabaseId::Album(id))?;
+
+        Self::update_album_artists(&mut self.artists, id, db_album, true);
+        Self::update_album_artists(&mut self.artists, id, &album, false);
 
         db_album.title = album.title;
         db_album.image = album.image;

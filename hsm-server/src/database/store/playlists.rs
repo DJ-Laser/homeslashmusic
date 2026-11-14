@@ -34,9 +34,6 @@ impl DatabaseStore {
     }
 
     pub fn insert_playlist(&mut self, playlist: PlaylistData) -> PlaylistId {
-        self.playlists.insert_with_key(|id| {
-            self.lookup.update_playlist(id, &playlist);
-            playlist
-        })
+        self.playlists.insert(playlist)
     }
 }

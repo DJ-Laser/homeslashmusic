@@ -1,9 +1,11 @@
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use slotmap::DenseSlotMap;
 
 use crate::database::store::{
-    AlbumId, ArtistId, DatabaseStore, MissingDatabaseId, MusicBrainzId, ResourceLocation,
+    ArtistData, ArtistId, DatabaseStore, MissingDatabaseId, MusicBrainzId, ResourceLocation,
+    TrackId,
 };
 
 slotmap::new_key_type! {
@@ -12,13 +14,13 @@ slotmap::new_key_type! {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DerivedSongData {
-    albums: Vec<AlbumId>,
+    pub(super) tracks: Vec<TrackId>,
 }
 
 impl DerivedSongData {
-    /// The albums this song is in
-    pub fn albums(&self) -> &Vec<AlbumId> {
-        &self.albums
+    /// The tracks that contain audio for this song
+    pub fn tracks(&self) -> &Vec<TrackId> {
+        &self.tracks
     }
 }
 
@@ -56,12 +58,36 @@ impl DatabaseStore {
     }
 
     pub fn lookup_song_by_mbid(&self, mbid: &MusicBrainzId) -> Option<SongId> {
-        self.lookup.song_by_mbid.get(mbid).copied()
+        self.song_by_mbid.get(mbid).copied()
+    }
+
+    fn update_song_artists(
+        artists: &mut DenseSlotMap<ArtistId, ArtistData>,
+        id: SongId,
+        song: &SongData,
+        remove: bool,
+    ) {
+        for artist_id in &song.artists {
+            let Some(artist) = artists.get_mut(*artist_id) else {
+                continue;
+            };
+
+            if remove {
+                artist.derived.songs.retain(|stored_id| id != *stored_id);
+            } else if !artist.derived.songs.contains(&id) {
+                artist.derived.songs.push(id);
+            }
+        }
     }
 
     pub fn insert_song(&mut self, song: SongData) -> SongId {
         self.songs.insert_with_key(|id| {
-            self.lookup.update_song(id, &song);
+            if let Some(mbid) = song.mbid {
+                self.song_by_mbid.insert(mbid, id);
+            }
+
+            Self::update_song_artists(&mut self.artists, id, &song, false);
+
             song
         })
     }
@@ -77,6 +103,9 @@ impl DatabaseStore {
         };
 
         let db_song = self.songs.get_mut(id).ok_or(MissingDatabaseId::Song(id))?;
+
+        Self::update_song_artists(&mut self.artists, id, db_song, true);
+        Self::update_song_artists(&mut self.artists, id, &song, false);
 
         db_song.title = song.title;
         db_song.image = song.image;

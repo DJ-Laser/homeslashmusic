@@ -10,8 +10,8 @@ slotmap::new_key_type! {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DerivedArtistData {
-    pub albums: Vec<AlbumId>,
-    pub songs: Vec<SongId>,
+    pub(super) albums: Vec<AlbumId>,
+    pub(super) songs: Vec<SongId>,
 }
 
 impl DerivedArtistData {
@@ -49,12 +49,15 @@ impl DatabaseStore {
     }
 
     pub fn lookup_artist_by_mbid(&self, mbid: &MusicBrainzId) -> Option<ArtistId> {
-        self.lookup.artist_by_mbid.get(mbid).copied()
+        self.artist_by_mbid.get(mbid).copied()
     }
 
     pub fn insert_artist(&mut self, artist: ArtistData) -> ArtistId {
         self.artists.insert_with_key(|id| {
-            self.lookup.update_artist(id, &artist);
+            if let Some(mbid) = artist.mbid {
+                self.artist_by_mbid.insert(mbid, id);
+            }
+
             artist
         })
     }
