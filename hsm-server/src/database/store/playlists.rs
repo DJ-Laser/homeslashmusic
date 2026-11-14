@@ -1,8 +1,9 @@
 use hsm_ipc::TrackId;
 use serde::{Deserialize, Serialize};
 
-use crate::database::store::{
-    AlbumId, DatabaseStore, MissingDatabaseId, ResourceLocation, SongId, TrackGroupId,
+use crate::database::{
+    sources::PlaylistLocation,
+    store::{AlbumId, DatabaseStore, Lookup, MissingDatabaseId, SongId, TrackGroupId},
 };
 
 slotmap::new_key_type! {
@@ -25,13 +26,13 @@ pub enum PlaylistEntry {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlaylistData {
+    /// The location of this playlist
+    pub location: PlaylistLocation,
     /// All entries in the playlist, sorted by play order
     pub entries: Vec<PlaylistEntry>,
 
     /// Name of the playlist
     pub name: String,
-    /// Cover image for the playlist
-    pub image: Option<ResourceLocation>,
     /// The genres associated with this playlist, sorted by relevance
     pub genres: Vec<String>,
 }
@@ -44,6 +45,16 @@ impl DatabaseStore {
     }
 
     pub fn insert_playlist(&mut self, playlist: PlaylistData) -> PlaylistId {
-        self.playlists.insert(playlist)
+        self.playlists.insert_with_key(|id| {
+            self.lookup.insert_playlist(playlist.location.clone(), id);
+
+            playlist
+        })
+    }
+}
+
+impl Lookup {
+    pub fn insert_playlist(&mut self, location: PlaylistLocation, id: PlaylistId) {
+        self.playlist.insert(location, id);
     }
 }

@@ -99,7 +99,8 @@ fn insert_artist(
     is_complete: bool,
 ) -> Result<ArtistId, MissingDatabaseId> {
     let artist = ArtistData {
-        mbid: None,
+        mbid: Some(mbid),
+        locations: Vec::new(),
         derived: DerivedArtistData::default(),
 
         name: Some(mb_artist.name),
@@ -150,7 +151,7 @@ fn get_artists(
         };
 
         let id = db
-            .lookup_artist_by_mbid(&mbid)
+            .lookup_artist_by_mbid(mbid)
             .map_or_else(|| insert_artist(db, mbid, credit.artist, false), Ok)?;
 
         artists.push(id);

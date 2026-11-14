@@ -1,8 +1,10 @@
+use std::mem;
+
 use serde::{Deserialize, Serialize};
 use slotmap::DenseSlotMap;
 
 use crate::database::store::{
-    ArtistData, ArtistId, DatabaseStore, MissingDatabaseId, MusicBrainzId, TrackGroupId,
+    ArtistData, ArtistId, DatabaseStore, Lookup, MissingDatabaseId, MusicBrainzId, TrackGroupId,
 };
 
 slotmap::new_key_type! {
@@ -51,13 +53,13 @@ impl DatabaseStore {
         self.albums.get(id).ok_or(MissingDatabaseId::Album(id))
     }
 
-    pub fn lookup_album(&self, mbid: &MusicBrainzId) -> Option<AlbumId> {
-        self.album_by_mbid.get(mbid).copied()
+    pub fn lookup_album(&self, mbid: MusicBrainzId) -> Option<AlbumId> {
+        self.lookup.album.get(&mbid).copied()
     }
 
     pub fn insert_album(&mut self, album: AlbumData) -> AlbumId {
         self.albums.insert_with_key(|id| {
-            self.album_by_mbid.insert(album.mbid, id);
+            self.lookup.insert_album(album.mbid, id);
 
             Self::update_album_links(&mut self.artists, id, &album, false);
 
@@ -88,7 +90,7 @@ impl DatabaseStore {
         &mut self,
         album: AlbumData,
     ) -> Result<AlbumId, MissingDatabaseId> {
-        let Some(id) = self.lookup_album(&album.mbid) else {
+        let Some(id) = self.lookup_album(album.mbid) else {
             return Ok(self.insert_album(album));
         };
 
@@ -98,14 +100,21 @@ impl DatabaseStore {
             .ok_or(MissingDatabaseId::Album(id))?;
 
         Self::update_album_links(&mut self.artists, id, db_album, true);
-        Self::update_album_links(&mut self.artists, id, &album, false);
 
-        db_album.title = album.title;
-        db_album.artists = album.artists;
-        db_album.artists_text = album.artists_text;
-        db_album.genres = album.genres;
-        db_album.date = album.date;
+        *db_album = AlbumData {
+            mbid: db_album.mbid,
+            derived: mem::replace(&mut db_album.derived, album.derived),
+            ..album
+        };
+
+        Self::update_album_links(&mut self.artists, id, db_album, false);
 
         Ok(id)
+    }
+}
+
+impl Lookup {
+    pub fn insert_album(&mut self, mbid: MusicBrainzId, id: AlbumId) {
+        self.album.insert(mbid, id);
     }
 }

@@ -4,14 +4,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::database::store::DatabaseStore;
 
-/// The location of a resource (audio or metadata) provided by a plugin
-/// Includes the plugin that has it, and a plugin-specific id to identify the song
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct ResourceLocation {
-    pub plugin: String,
-    pub id: String,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct MusicBrainzId(uuid::Uuid);
 

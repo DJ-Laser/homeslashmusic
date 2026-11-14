@@ -1,11 +1,14 @@
-use std::time::Duration;
+use std::{mem, time::Duration};
 
 use serde::{Deserialize, Serialize};
 use slotmap::DenseSlotMap;
 
-use crate::database::store::{
-    DatabaseStore, MissingDatabaseId, ResourceLocation, SongData, SongId, TrackGroupData,
-    TrackGroupId,
+use crate::database::{
+    sources::TrackLocation,
+    store::{
+        ArtistId, DatabaseStore, Lookup, MissingDatabaseId, SongData, SongId, TrackGroupData,
+        TrackGroupId,
+    },
 };
 
 slotmap::new_key_type! {
@@ -18,7 +21,7 @@ pub struct DerivedTrackData {}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrackData {
     /// The location of this track's audio data
-    pub location: ResourceLocation,
+    pub location: TrackLocation,
     /// Track data derrived other database entries
     #[serde(skip)]
     pub derived: DerivedTrackData,
@@ -34,6 +37,11 @@ pub struct TrackData {
     pub length: Duration,
     /// The track number of this track
     pub track_number: Option<u32>,
+
+    /// Artists assocated with this track, sorted as they appear on the track metadata
+    pub artists: Vec<ArtistId>,
+    /// The string representation of the track's artists. May include separators like "feat."
+    pub artists_text: Option<String>,
 }
 
 impl DatabaseStore {
@@ -41,8 +49,8 @@ impl DatabaseStore {
         self.tracks.get(id).ok_or(MissingDatabaseId::Track(id))
     }
 
-    pub fn lookup_track_by_location(&self, location: &ResourceLocation) -> Option<TrackId> {
-        self.track_by_location.get(location).copied()
+    pub fn lookup_track_by_location(&self, location: &TrackLocation) -> Option<TrackId> {
+        self.lookup.track.get(location).copied()
     }
 
     pub(super) fn update_track_links(
@@ -78,7 +86,7 @@ impl DatabaseStore {
 
     fn insert_track(&mut self, track: TrackData) -> TrackId {
         self.tracks.insert_with_key(|id| {
-            self.track_by_location.insert(track.location.clone(), id);
+            self.lookup.insert_track(track.location.clone(), id);
 
             Self::update_track_links(&mut self.songs, &mut self.track_groups, id, &track, false);
 
@@ -100,15 +108,21 @@ impl DatabaseStore {
             .ok_or(MissingDatabaseId::Track(id))?;
 
         Self::update_track_links(&mut self.songs, &mut self.track_groups, id, db_track, true);
-        Self::update_track_links(&mut self.songs, &mut self.track_groups, id, &track, false);
 
-        db_track.song = track.song;
-        db_track.track_group = track.track_group;
+        *db_track = TrackData {
+            location: mem::replace(&mut db_track.location, track.location),
+            derived: mem::replace(&mut db_track.derived, track.derived),
+            ..track
+        };
 
-        db_track.title = track.title;
-        db_track.length = track.length;
-        db_track.track_number = track.track_number;
+        Self::update_track_links(&mut self.songs, &mut self.track_groups, id, db_track, false);
 
         Ok(id)
+    }
+}
+
+impl Lookup {
+    pub fn insert_track(&mut self, location: TrackLocation, id: TrackId) {
+        self.track.insert(location, id);
     }
 }

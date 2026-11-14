@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use slotmap::DenseSlotMap;
 
 use crate::database::store::{
-    ArtistData, ArtistId, DatabaseStore, MissingDatabaseId, MusicBrainzId, TrackId,
+    ArtistData, ArtistId, DatabaseStore, Lookup, MissingDatabaseId, MusicBrainzId, TrackId,
 };
 
 slotmap::new_key_type! {
@@ -60,7 +60,7 @@ impl DatabaseStore {
     }
 
     pub fn lookup_song(&self, mbid: &MusicBrainzId) -> Option<SongId> {
-        self.song_by_mbid.get(mbid).copied()
+        self.lookup.song.get(mbid).copied()
     }
 
     pub(super) fn update_song_links(
@@ -84,7 +84,7 @@ impl DatabaseStore {
 
     pub fn insert_song(&mut self, song: SongData) -> SongId {
         self.songs.insert_with_key(|id| {
-            self.song_by_mbid.insert(song.mbid, id);
+            self.lookup.insert_song(song.mbid, id);
 
             Self::update_song_links(&mut self.artists, id, &song, false);
 
@@ -111,5 +111,11 @@ impl DatabaseStore {
         db_song.mix_songs = song.mix_songs;
 
         Ok(id)
+    }
+}
+
+impl Lookup {
+    pub fn insert_song(&mut self, mbid: MusicBrainzId, id: SongId) {
+        self.song.insert(mbid, id);
     }
 }

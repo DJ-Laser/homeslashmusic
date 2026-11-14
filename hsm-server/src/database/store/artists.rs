@@ -1,6 +1,11 @@
+use std::mem;
+
 use serde::{Deserialize, Serialize};
 
-use crate::database::store::{AlbumId, DatabaseStore, MissingDatabaseId, MusicBrainzId, SongId};
+use crate::database::{
+    sources::ArtistLocation,
+    store::{AlbumId, DatabaseStore, Lookup, MissingDatabaseId, MusicBrainzId, SongId},
+};
 
 slotmap::new_key_type! {
     pub struct ArtistId;
@@ -31,8 +36,10 @@ impl DerivedArtistData {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArtistData {
-    /// The `MusicBrainzId` for this artist
+    /// The `MusicBrainzId` for this album
     pub mbid: Option<MusicBrainzId>,
+    /// The locations of this artist
+    pub locations: Vec<ArtistLocation>,
     /// Artist data derrived other database entries
     #[serde(skip)]
     pub derived: DerivedArtistData,
@@ -50,18 +57,39 @@ impl DatabaseStore {
         self.artists.get(id).ok_or(MissingDatabaseId::Artist(id))
     }
 
-    pub fn lookup_artist_by_mbid(&self, mbid: &MusicBrainzId) -> Option<ArtistId> {
-        self.artist_by_mbid.get(mbid).copied()
+    pub fn lookup_artist_by_mbid(&self, mbid: MusicBrainzId) -> Option<ArtistId> {
+        self.lookup.artist_by_mbid.get(&mbid).copied()
+    }
+
+    pub fn lookup_artist_by_location(&self, location: &ArtistLocation) -> Option<ArtistId> {
+        self.lookup.artist_by_location.get(location).copied()
     }
 
     pub fn insert_artist(&mut self, artist: ArtistData) -> ArtistId {
         self.artists.insert_with_key(|id| {
-            if let Some(mbid) = artist.mbid {
-                self.artist_by_mbid.insert(mbid, id);
-            }
+            self.lookup
+                .insert_artist(artist.mbid, &artist.locations, id);
 
             artist
         })
+    }
+
+    pub fn add_location_to_artist_by_mbid(
+        &mut self,
+        mbid: MusicBrainzId,
+        location: ArtistLocation,
+    ) -> Result<ArtistId, ArtistLocation> {
+        let Some(id) = self.lookup_artist_by_mbid(mbid) else {
+            return Err(location);
+        };
+
+        if let Some(db_artist) = self.artists.get_mut(id)
+            && !db_artist.locations.contains(&location)
+        {
+            db_artist.locations.push(location);
+        }
+
+        Ok(id)
     }
 
     pub fn update_or_insert_artist_by_mbid(
@@ -69,7 +97,7 @@ impl DatabaseStore {
         mbid: MusicBrainzId,
         mut artist: ArtistData,
     ) -> Result<ArtistId, MissingDatabaseId> {
-        let Some(id) = self.lookup_artist_by_mbid(&mbid) else {
+        let Some(id) = self.lookup_artist_by_mbid(mbid) else {
             artist.mbid = Some(mbid);
             return Ok(self.insert_artist(artist));
         };
@@ -79,10 +107,35 @@ impl DatabaseStore {
             .get_mut(id)
             .ok_or(MissingDatabaseId::Artist(id))?;
 
-        db_artist.name = artist.name;
-        db_artist.sort_name = artist.sort_name;
-        db_artist.genres = artist.genres;
+        for location in db_artist.locations.drain(..) {
+            if !artist.locations.contains(&location) {
+                artist.locations.push(location);
+            }
+        }
+
+        *db_artist = ArtistData {
+            mbid: db_artist.mbid,
+            derived: mem::replace(&mut db_artist.derived, artist.derived),
+            ..artist
+        };
 
         Ok(id)
+    }
+}
+
+impl Lookup {
+    pub fn insert_artist(
+        &mut self,
+        mbid: Option<MusicBrainzId>,
+        locations: &Vec<ArtistLocation>,
+        id: ArtistId,
+    ) {
+        if let Some(mbid) = mbid {
+            self.artist_by_mbid.insert(mbid, id);
+        }
+
+        for location in locations {
+            self.artist_by_location.insert(location.clone(), id);
+        }
     }
 }

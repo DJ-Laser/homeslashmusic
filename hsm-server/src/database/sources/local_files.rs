@@ -9,15 +9,13 @@ use thiserror::Error;
 
 use crate::database::{
     jobs::JobContext,
-    sources::musicbrainz,
+    sources::{ArtistLocation, TrackGroupLocation, TrackLocation, musicbrainz},
     store::{
         AlbumData, AlbumId, ArtistData, ArtistId, DerivedAlbumData, DerivedArtistData,
         DerivedSongData, DerivedTrackData, DerivedTrackGroupData, MissingDatabaseId, MusicBrainzId,
-        ResourceLocation, SongData, SongId, TrackData, TrackGroupData, TrackGroupId, TrackId,
+        SongData, SongId, TrackData, TrackGroupData, TrackGroupId, TrackId,
     },
 };
-
-const PLUGIN_ID: &str = "local_files";
 
 #[derive(Debug, Error)]
 pub enum LoadFileError {
@@ -77,13 +75,25 @@ fn get_artists(ctx: &JobContext, tag: &Tag, album: bool) -> Vec<ArtistId> {
                 return;
             };
 
-            if let Some(id) = db.lookup_artist_by_mbid(&mbid) {
-                artists.push(id);
-                return;
-            }
+            let location = name.map(|name| ArtistLocation::Local { name: name.into() });
+            let id = if let Some(location) = location {
+                db.add_location_to_artist_by_mbid(mbid, location)
+                    .map_err(Some)
+            } else {
+                db.lookup_artist_by_mbid(mbid).ok_or(location)
+            };
+
+            let location = match id {
+                Ok(id) => {
+                    artists.push(id);
+                    return;
+                }
+                Err(location) => location,
+            };
 
             let id = db.insert_artist(ArtistData {
                 mbid: Some(mbid),
+                locations: location.into_iter().collect(),
                 derived: DerivedArtistData::default(),
 
                 name: name.map(Into::into),
@@ -187,7 +197,7 @@ fn get_album(ctx: &JobContext, tag: &Tag) -> Option<AlbumId> {
     let mbid =
         MusicBrainzId::parse_str(tag.get_string(ItemKey::MusicBrainzReleaseGroupId)?).ok()?;
 
-    if let Some(id) = ctx.read_db(|db| db.lookup_album(&mbid)) {
+    if let Some(id) = ctx.read_db(|db| db.lookup_album(mbid)) {
         return Some(id);
     }
 
@@ -217,10 +227,14 @@ fn get_album(ctx: &JobContext, tag: &Tag) -> Option<AlbumId> {
 
 fn get_track_group(ctx: &JobContext, tag: &Tag) -> Option<TrackGroupId> {
     let title: String = tag.album().map(Into::into)?;
+    let location_artist: String = tag
+        .get_string(ItemKey::AlbumArtist)
+        .or(tag.get_string(ItemKey::TrackArtist))
+        .map(Into::into)?;
 
-    let location = ResourceLocation {
-        plugin: PLUGIN_ID.into(),
-        id: title.clone(),
+    let location = TrackGroupLocation::Local {
+        title: title.clone(),
+        artist: location_artist,
     };
 
     if let Some(id) = ctx.read_db(|db| db.lookup_track_group(&location)) {
@@ -228,7 +242,8 @@ fn get_track_group(ctx: &JobContext, tag: &Tag) -> Option<TrackGroupId> {
     }
 
     let album = get_album(ctx, tag);
-
+    let artists = get_artists(ctx, tag, true);
+    let artists_text = tag.get_string(ItemKey::AlbumArtist).map(Into::into);
     let track_count = tag.track_total();
 
     let album = ctx.write_db(|db| {
@@ -240,6 +255,9 @@ fn get_track_group(ctx: &JobContext, tag: &Tag) -> Option<TrackGroupId> {
 
             title: Some(title),
             track_count,
+
+            artists,
+            artists_text,
         })
     });
 
@@ -247,10 +265,7 @@ fn get_track_group(ctx: &JobContext, tag: &Tag) -> Option<TrackGroupId> {
 }
 
 async fn load_song_file(ctx: JobContext, path: PathBuf) -> Result<TrackId, LoadFileError> {
-    let location = ResourceLocation {
-        plugin: PLUGIN_ID.into(),
-        id: path.to_string_lossy().into_owned(),
-    };
+    let location = TrackLocation::Local(path.clone());
 
     let (length, Some(ref tag)) = parse_file_tags(path).await? else {
         return Err(LoadFileError::MissingTags);
@@ -261,6 +276,8 @@ async fn load_song_file(ctx: JobContext, path: PathBuf) -> Result<TrackId, LoadF
 
     let title = tag.title().map(Into::into);
     let track_number = tag.track();
+    let artists = get_artists(&ctx, tag, false);
+    let artists_text = tag.get_string(ItemKey::AlbumArtist).map(Into::into);
 
     let track = ctx.write_db(|db| {
         db.update_or_insert_track(TrackData {
@@ -273,6 +290,9 @@ async fn load_song_file(ctx: JobContext, path: PathBuf) -> Result<TrackId, LoadF
             title,
             length,
             track_number,
+
+            artists,
+            artists_text,
         })
     })?;
 
