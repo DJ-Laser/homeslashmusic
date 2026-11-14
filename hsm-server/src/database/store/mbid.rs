@@ -31,7 +31,7 @@ impl DatabaseStore {
     /// Add a query for a `MusicBrainzId` to the pending set
     /// Returns the mbid if a query is already pending
     pub fn claim_mbid_query(&mut self, mbid: MusicBrainzId) -> Result<(), MusicBrainzId> {
-        if self.unqueried_mbids.insert(mbid) {
+        if self.pending_mbids.insert(mbid) {
             self.failed_mbids.remove(&mbid);
 
             Ok(())
@@ -43,13 +43,13 @@ impl DatabaseStore {
     /// Mark the query for the specified mbid as completed and remove it from the pending set
     pub fn complete_mbid_query(&mut self, mbid: MusicBrainzId) {
         self.failed_mbids.remove(&mbid);
-        self.unqueried_mbids.remove(&mbid);
+        self.pending_mbids.remove(&mbid);
     }
 
     /// Mark the query for the specified mbid as failed and remove it from the pending set
     /// If the mbid was not in the pending set, does nothing
     pub fn fail_mbid_query(&mut self, mbid: MusicBrainzId) {
-        if self.unqueried_mbids.remove(&mbid) {
+        if self.pending_mbids.remove(&mbid) {
             self.failed_mbids.insert(mbid);
         }
     }

@@ -3,6 +3,7 @@
 use std::{
     path::PathBuf,
     sync::{Arc, RwLock},
+    time::Duration,
 };
 
 use smol::Executor;
@@ -38,7 +39,9 @@ impl MusicDatabase {
             .spawn(async move {
                 sources::local_files::load_all_from_path(ctx.clone(), path).await;
 
-                //ctx.read_db(|db| println!("{db:?}"));
+                smol::Timer::after(Duration::from_secs(10)).await;
+
+                ctx.read_db(DatabaseStore::print_contents);
             })
             .await;
     }

@@ -77,7 +77,7 @@ pub struct DatabaseStore {
     #[serde(skip)]
     lookup: Lookup,
 
-    unqueried_mbids: HashSet<MusicBrainzId>,
+    pending_mbids: HashSet<MusicBrainzId>,
     failed_mbids: HashSet<MusicBrainzId>,
 }
 
@@ -124,6 +124,79 @@ impl DatabaseStore {
         for (id, artist) in &self.artists {
             self.lookup
                 .insert_artist(artist.mbid, &artist.locations, id);
+        }
+    }
+
+    pub fn print_contents(&self) {
+        println!("##### TRACKS #####");
+        println!();
+        for (_, track) in &self.tracks {
+            println!(
+                "{} - {}",
+                track.title.as_deref().unwrap_or("Unknown Track"),
+                track.artists_text.as_deref().unwrap_or("Unknown Artist")
+            );
+        }
+        println!();
+
+        println!("##### TRACK GROUPS #####");
+        println!();
+        for (_, track_group) in &self.track_groups {
+            println!(
+                "{} - {} ({} tracks)",
+                track_group
+                    .title
+                    .as_deref()
+                    .unwrap_or("Unknown Track Group"),
+                track_group
+                    .artists_text
+                    .as_deref()
+                    .unwrap_or("Unknown Artist"),
+                track_group.track_count.unwrap_or_default()
+            );
+        }
+        println!();
+
+        println!("##### SONGS #####");
+        println!();
+        for (_, song) in &self.songs {
+            println!(
+                "{} - {}, ({} mixed songs)",
+                song.title.as_deref().unwrap_or("Unknown Song"),
+                song.artists_text.as_deref().unwrap_or("Unknown Artist"),
+                song.mix_songs.len()
+            );
+        }
+        println!();
+
+        println!("##### ALBUMS #####");
+        println!();
+        for (_, album) in &self.albums {
+            println!(
+                "{} - {}, ({} track groups)",
+                album.title.as_deref().unwrap_or("Unknown Album"),
+                album.artists_text.as_deref().unwrap_or("Unknown Artist"),
+                album.derived.track_groups.len()
+            );
+        }
+        println!();
+
+        println!("##### ARTISTS #####");
+        println!();
+        for (_, artist) in &self.artists {
+            println!(
+                "{}, ({} songs and {} albums)",
+                artist.name.as_deref().unwrap_or("Unknown Artist"),
+                artist.derived.songs.len(),
+                artist.derived.albums.len(),
+            );
+        }
+        println!();
+
+        println!("##### PENDING MBIDS #####");
+        println!();
+        for mbid in &self.pending_mbids {
+            println!("{mbid}");
         }
     }
 }

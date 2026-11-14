@@ -62,12 +62,14 @@ async fn run_servers(ex: &Arc<Executor<'static>>) -> Result<(), MainError> {
 
 fn main() {
     let ex: Arc<Executor<'static>> = Arc::new(Executor::new());
-    match smol::block_on(ex.run(run_servers(&ex))) {
-        Ok(()) => (),
-        Err(error) => eprintln!("{error}"),
-    }
+    if false {
+        match smol::block_on(ex.run(run_servers(&ex))) {
+            Ok(()) => (),
+            Err(error) => eprintln!("{error}"),
+        }
 
-    println!("hsm-server shutting down");
+        println!("hsm-server shutting down");
+    }
 
     let Some(arg) = env::args().nth(1) else {
         eprintln!("Specify a path to search");
