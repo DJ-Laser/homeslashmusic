@@ -12,8 +12,8 @@ use crate::database::{
     sources::{ArtistLocation, TrackGroupLocation, TrackLocation},
     store::{
         AlbumData, AlbumId, ArtistData, ArtistId, DerivedAlbumData, DerivedArtistData,
-        DerivedSongData, DerivedTrackData, DerivedTrackGroupData, MissingDatabaseId, MusicBrainzId,
-        SongData, SongId, TrackData, TrackGroupData, TrackGroupId, TrackId,
+        DerivedSongData, DerivedTrackData, DerivedTrackGroupData, MbidQueryType, MissingDatabaseId,
+        MusicBrainzId, SongData, SongId, TrackData, TrackGroupData, TrackGroupId, TrackId,
     },
 };
 
@@ -91,6 +91,7 @@ fn get_artists(ctx: &JobContext, tag: &Tag, album: bool) -> Vec<ArtistId> {
                 Err(location) => location,
             };
 
+            db.set_mbid_incomplete(mbid, MbidQueryType::Artist);
             let id = db.insert_artist(ArtistData {
                 mbid: Some(mbid),
                 locations: location.into_iter().collect(),
@@ -171,6 +172,7 @@ fn get_song(ctx: &JobContext, tag: &Tag) -> Option<SongId> {
     let length = tag.get_string(ItemKey::Length).and_then(parse_song_length);
 
     let song = ctx.write_db(|db| {
+        db.set_mbid_incomplete(mbid, MbidQueryType::Recording);
         db.insert_song(SongData {
             mbid,
             derived: DerivedSongData::default(),
@@ -205,6 +207,7 @@ fn get_album(ctx: &JobContext, tag: &Tag) -> Option<AlbumId> {
     let date = get_date(tag);
 
     let album = ctx.write_db(|db| {
+        db.set_mbid_incomplete(mbid, MbidQueryType::ReleaseGroup);
         db.insert_album(AlbumData {
             mbid,
             derived: DerivedAlbumData::default(),

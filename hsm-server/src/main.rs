@@ -3,7 +3,7 @@ mod database;
 mod plugin_manager;
 mod signals;
 
-use std::{env, future, path::PathBuf, sync::Arc};
+use std::{env, path::PathBuf, sync::Arc};
 
 use audio_server::{AudioServer, AudioServerError};
 use futures_concurrency::future::Race;
@@ -13,8 +13,6 @@ use plugin_manager::{PluginError, PluginManager, PluginRunner};
 use signals::{SignalHandler, SignalHandlerError};
 use smol::Executor;
 use thiserror::Error;
-
-use crate::database::MusicDatabase;
 
 #[derive(Debug, Error)]
 pub enum MainError {
@@ -77,9 +75,9 @@ fn main() {
     };
 
     let path = PathBuf::from(arg);
-    let db = MusicDatabase::new_empty(ex.clone());
-    smol::block_on(ex.run(async move {
-        db.start_update(path).await;
-        future::pending::<()>().await;
+    let db = database::init_blank_database(&ex);
+    smol::block_on(ex.clone().run(async move {
+        db.run_job(&ex, |ctx| database::start_update(ctx, path))
+            .await;
     }));
 }

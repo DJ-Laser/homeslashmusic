@@ -1,6 +1,7 @@
-use std::{collections::HashMap, fmt::Display};
+use std::{collections::HashMap, fmt::Display, mem::DropGuard};
 
 use serde::{Deserialize, Serialize};
+use smol::channel::Receiver;
 
 use crate::database::{
     jobs::JobContext,
@@ -57,13 +58,20 @@ impl MbidQueryState {
     }
 
     /// Get an incomplete mbid and mark it as pending
-    ///
     fn claim_next_incomplete(&mut self) -> Option<(MusicBrainzId, MbidQueryType)> {
         self.incomplete
             .iter()
             .filter(|(mbid, _)| !self.pending.contains_key(mbid))
             .map(|(&mbid, &query_type)| (mbid, query_type))
             .next()
+    }
+
+    /// Return a pending mbid to the incomplete set
+    /// Use this instead of fail if the operation was aborted, but did not fail
+    fn unclaim(&mut self, mbid: MusicBrainzId) {
+        if let Some(query_type) = self.pending.remove(&mbid) {
+            self.incomplete.insert(mbid, query_type);
+        }
     }
 
     /// Mark the query for the specified mbid as completed and remove it from the incomplete/pending/fail sets
@@ -82,10 +90,36 @@ impl MbidQueryState {
     }
 }
 
-pub async fn fetch_incomplete_mbids(ctx: JobContext) {
-    while let Some((mbid, query_type)) =
-        ctx.write_db(|db| db.mbid_query_state.claim_next_incomplete())
-    {
+impl DatabaseStore {
+    pub fn set_mbid_incomplete(&mut self, mbid: MusicBrainzId, query_type: MbidQueryType) {
+        self.mbid_query_state.insert_incomplete(mbid, query_type);
+    }
+
+    pub fn complete_mbid_query(&mut self, mbid: MusicBrainzId) {
+        self.mbid_query_state.complete(mbid);
+    }
+
+    pub fn has_incomplete_mbids(&self) -> bool {
+        !self.mbid_query_state.incomplete.is_empty()
+    }
+}
+
+pub async fn fetch_incomplete_mbids(ctx: JobContext, waker: Receiver<()>) {
+    loop {
+        let Some((mbid, query_type)) =
+            ctx.write_db(|db| db.mbid_query_state.claim_next_incomplete())
+        else {
+            if waker.recv().await.is_err() {
+                break;
+            }
+
+            continue;
+        };
+
+        let guard = DropGuard::new((), |()| {
+            ctx.write_db(|db| db.mbid_query_state.unclaim(mbid));
+        });
+
         let result = match query_type {
             MbidQueryType::Recording => fetch_recording(&ctx, mbid).await,
             MbidQueryType::ReleaseGroup => fetch_release_group(&ctx, mbid).await,
@@ -93,17 +127,13 @@ pub async fn fetch_incomplete_mbids(ctx: JobContext) {
         };
 
         match result {
-            Ok(()) => ctx.write_db(|db| db.mbid_query_state.complete(mbid)),
+            Ok(()) => ctx.write_db(|db| db.complete_mbid_query(mbid)),
             Err(err) => {
                 ctx.write_db(|db| db.mbid_query_state.fail(mbid));
                 eprintln!("Failed to fetch musicbrainz: {err}");
             }
         }
-    }
-}
 
-impl DatabaseStore {
-    pub fn complete_mbid_query(&mut self, mbid: MusicBrainzId) {
-        self.mbid_query_state.complete(mbid);
+        DropGuard::dismiss(guard);
     }
 }

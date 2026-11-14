@@ -1,21 +1,18 @@
-//! Jobs are asynchronous operations for updating the database state
-//! Jobs have a chain of dependencies
-
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use smol::Executor;
 
-use crate::database::store::DatabaseStore;
+use crate::database::{DatabaseHandle, store::DatabaseStore};
 
 #[derive(Debug, Clone)]
 pub struct JobContext {
     executor: Arc<Executor<'static>>,
-    db: Arc<RwLock<DatabaseStore>>,
+    handle: DatabaseHandle,
 }
 
 impl JobContext {
-    pub fn new(executor: Arc<Executor<'static>>, db: Arc<RwLock<DatabaseStore>>) -> Self {
-        Self { executor, db }
+    pub fn new(executor: Arc<Executor<'static>>, handle: DatabaseHandle) -> Self {
+        Self { executor, handle }
     }
 
     /// Spawn a new job that runs in parallel to the current job.
@@ -44,7 +41,7 @@ impl JobContext {
     where
         F: FnOnce(&DatabaseStore) -> R,
     {
-        f(&self.db.read().unwrap())
+        self.handle.read_db(f)
     }
 
     /// Synchronously write to the database
@@ -52,6 +49,6 @@ impl JobContext {
     where
         F: FnOnce(&mut DatabaseStore) -> R,
     {
-        f(&mut self.db.write().unwrap())
+        self.handle.write_db(f)
     }
 }

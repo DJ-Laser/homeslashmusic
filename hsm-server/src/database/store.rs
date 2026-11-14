@@ -210,11 +210,12 @@ impl DatabaseStore {
         for mbid in self.mbid_query_state.incomplete.keys() {
             if self.mbid_query_state.pending.contains_key(mbid) {
                 println!("{mbid} (pending)");
-            } else if self.mbid_query_state.failed.contains_key(mbid) {
-                println!("{mbid} (failed)");
             } else {
                 println!("{mbid}");
             }
+        }
+        for mbid in self.mbid_query_state.failed.keys() {
+            println!("{mbid} (failed)");
         }
 
         println!();
