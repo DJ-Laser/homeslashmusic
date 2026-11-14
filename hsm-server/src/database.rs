@@ -95,6 +95,8 @@ pub async fn start_update(ctx: JobContext, path: PathBuf) {
     sources::local_files::load_all_from_path(ctx.clone(), path).await;
     println!("Done!");
 
+    ctx.read_db(DatabaseStore::print_contents);
+
     print!("Waiting for api requests");
     let _ = std::io::stdout().flush();
 
