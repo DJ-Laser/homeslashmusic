@@ -1,4 +1,4 @@
-use std::{num::NonZeroU32, sync::LazyLock, time::Duration};
+use std::{mem::DropGuard, num::NonZeroU32, sync::LazyLock, time::Duration};
 
 use governor::{Jitter, Quota, RateLimiter};
 use musicbrainz_rs::{
@@ -6,6 +6,7 @@ use musicbrainz_rs::{
     entity::{
         artist::Artist,
         artist_credit::ArtistCredit,
+        genre::Genre,
         recording::Recording,
         relations::{Relation, RelationContent},
         release::Release,
@@ -73,23 +74,30 @@ where
 fn insert_pending_query(
     ctx: &JobContext,
     mbid: MusicBrainzId,
-) -> Result<(), MusicBrainzFetchError> {
+) -> Result<DropGuard<(), impl FnOnce(())>, MusicBrainzFetchError> {
     ctx.write_db(|db| db.claim_mbid_query(mbid))
+        .map(|()| {
+            DropGuard::new((), move |()| {
+                ctx.write_db(|db| db.fail_mbid_query(mbid));
+            })
+        })
         .map_err(MusicBrainzFetchError::PendingQuery)
+}
+
+fn get_genres(genres: Option<Vec<Genre>>) -> Vec<String> {
+    genres
+        .into_iter()
+        .flatten()
+        .map(|genre| genre.name)
+        .collect()
 }
 
 fn insert_artist(
     db: &mut DatabaseStore,
     mbid: MusicBrainzId,
     mb_artist: Artist,
+    is_complete: bool,
 ) -> Result<ArtistId, MissingDatabaseId> {
-    let genres = mb_artist
-        .genres
-        .into_iter()
-        .flatten()
-        .map(|genre| genre.name)
-        .collect();
-
     let artist = ArtistData {
         mbid: None,
         derived: DerivedArtistData::default(),
@@ -97,11 +105,13 @@ fn insert_artist(
         name: Some(mb_artist.name),
         sort_name: Some(mb_artist.sort_name),
         image: None,
-        genres,
+        genres: get_genres(mb_artist.genres),
     };
 
-    db.complete_mbid_query(&mbid);
     let id = db.update_or_insert_artist_by_mbid(mbid, artist)?;
+    if is_complete {
+        db.complete_mbid_query(mbid);
+    }
 
     Ok(id)
 }
@@ -109,19 +119,24 @@ fn insert_artist(
 pub async fn fetch_artist(
     ctx: JobContext,
     mbid: MusicBrainzId,
-) -> Result<ArtistId, MusicBrainzFetchError> {
-    insert_pending_query(&ctx, mbid)?;
+) -> Result<(), MusicBrainzFetchError> {
+    let guard = insert_pending_query(&ctx, mbid)?;
     let mb_artist = fetch_rate_limited(&mbid, Artist::fetch().with_genres()).await?;
 
-    let id = ctx.write_db(|db| insert_artist(db, mbid, mb_artist))?;
+    ctx.write_db(|db| insert_artist(db, mbid, mb_artist, true))?;
+    DropGuard::dismiss(guard);
 
-    Ok(id)
+    Ok(())
 }
 
 fn get_artists(
     db: &mut DatabaseStore,
-    artist_credits: Vec<ArtistCredit>,
+    artist_credits: Option<Vec<ArtistCredit>>,
 ) -> Result<(Vec<ArtistId>, Option<String>), MissingDatabaseId> {
+    let Some(artist_credits) = artist_credits else {
+        return Ok((Vec::new(), None));
+    };
+
     let mut artists = Vec::new();
     let mut artists_text = String::new();
 
@@ -137,7 +152,7 @@ fn get_artists(
 
         let id = db
             .lookup_artist_by_mbid(&mbid)
-            .map_or_else(|| insert_artist(db, mbid, credit.artist), Ok)?;
+            .map_or_else(|| insert_artist(db, mbid, credit.artist, false), Ok)?;
 
         artists.push(id);
     }
@@ -149,79 +164,66 @@ fn get_artists(
     }
 }
 
-pub async fn fetch_release(
-    ctx: JobContext,
+fn insert_album(
+    db: &mut DatabaseStore,
     mbid: MusicBrainzId,
-) -> Result<AlbumId, MusicBrainzFetchError> {
-    insert_pending_query(&ctx, mbid)?;
-    let mb_release = fetch_rate_limited(
-        &mbid,
-        Release::fetch().with_genres().with_artists().with_media(),
-    )
-    .await?;
-
-    let genres = mb_release
-        .genres
-        .into_iter()
-        .flatten()
-        .map(|genre| genre.name)
-        .collect();
-
-    let (artists, artists_text) = mb_release
-        .artist_credit
-        .map(|artist_credits| ctx.write_db(|db| get_artists(db, artist_credits)))
-        .transpose()?
-        .unwrap_or_default();
+    mb_release: Release,
+    is_complete: bool,
+) -> Result<AlbumId, MissingDatabaseId> {
+    let (artists, artists_text) = get_artists(db, mb_release.artist_credit)?;
 
     let song_count = mb_release
         .media
         .map(|media| media.iter().map(|medium| medium.track_count).sum());
 
-    let artist = AlbumData {
+    let album = AlbumData {
         mbid: None,
         derived: DerivedAlbumData::default(),
 
         title: Some(mb_release.title),
         image: None,
         date: mb_release.date.map(Into::into),
-        genres,
+        genres: get_genres(mb_release.genres),
         track_count: song_count,
 
         artists,
         artists_text,
     };
 
-    let id = ctx.write_db(|db| {
-        db.complete_mbid_query(&mbid);
-        db.update_or_insert_album_by_mbid(mbid, artist)
-    })?;
+    let id = db.update_or_insert_album_by_mbid(mbid, album)?;
+    if is_complete {
+        db.complete_mbid_query(mbid);
+    }
 
     Ok(id)
 }
 
+pub async fn fetch_release(
+    ctx: JobContext,
+    mbid: MusicBrainzId,
+) -> Result<(), MusicBrainzFetchError> {
+    let guard = insert_pending_query(&ctx, mbid)?;
+    let mb_release = fetch_rate_limited(
+        &mbid,
+        Release::fetch().with_genres().with_artists().with_media(),
+    )
+    .await?;
+
+    ctx.write_db(|db| insert_album(db, mbid, mb_release, true))?;
+    DropGuard::dismiss(guard);
+
+    Ok(())
+}
+
 fn insert_song(
-    ctx: &JobContext,
+    db: &mut DatabaseStore,
     mbid: MusicBrainzId,
     mb_recording: Recording,
+    is_complete: bool,
 ) -> Result<SongId, MissingDatabaseId> {
-    let genres = mb_recording
-        .genres
-        .into_iter()
-        .flatten()
-        .map(|genre| genre.name)
-        .collect();
+    let (artists, artists_text) = get_artists(db, mb_recording.artist_credit)?;
 
-    let (artists, artists_text) = mb_recording
-        .artist_credit
-        .map(|artist_credits| ctx.write_db(|db| get_artists(db, artist_credits)))
-        .transpose()?
-        .unwrap_or_default();
-
-    let mix_songs = mb_recording
-        .relations
-        .map(|relations| get_mix_songs(ctx, relations))
-        .transpose()?
-        .unwrap_or_default();
+    let mix_songs = get_mix_songs(db, mb_recording.relations)?;
 
     let song = SongData {
         mbid: None,
@@ -233,7 +235,7 @@ fn insert_song(
             .length
             .map(|ms| Duration::from_millis(u64::from(ms))),
         date: mb_recording.first_release_date.map(Into::into),
-        genres,
+        genres: get_genres(mb_recording.genres),
 
         artists,
         artists_text,
@@ -241,18 +243,22 @@ fn insert_song(
         mix_songs,
     };
 
-    let id = ctx.write_db(|db| {
-        db.complete_mbid_query(&mbid);
-        db.update_or_insert_song_by_mbid(mbid, song)
-    })?;
+    let id = db.update_or_insert_song_by_mbid(mbid, song)?;
+    if is_complete {
+        db.complete_mbid_query(mbid);
+    }
 
     Ok(id)
 }
 
 fn get_mix_songs(
-    ctx: &JobContext,
-    relations: Vec<Relation>,
+    db: &mut DatabaseStore,
+    relations: Option<Vec<Relation>>,
 ) -> Result<Vec<SongId>, MissingDatabaseId> {
+    let Some(relations) = relations else {
+        return Ok(Vec::new());
+    };
+
     relations
         .into_iter()
         .map(|relation| {
@@ -268,9 +274,9 @@ fn get_mix_songs(
                 return Ok(None);
             };
 
-            let id = ctx
-                .read_db(|db| db.lookup_song_by_mbid(&mbid))
-                .map_or_else(|| insert_song(ctx, mbid, *mix_recording), Ok)?;
+            let id = db
+                .lookup_song_by_mbid(&mbid)
+                .map_or_else(|| insert_song(db, mbid, *mix_recording, false), Ok)?;
 
             Ok(Some(id))
         })
@@ -281,8 +287,8 @@ fn get_mix_songs(
 pub async fn fetch_recording(
     ctx: JobContext,
     mbid: MusicBrainzId,
-) -> Result<SongId, MusicBrainzFetchError> {
-    insert_pending_query(&ctx, mbid)?;
+) -> Result<(), MusicBrainzFetchError> {
+    let guard = insert_pending_query(&ctx, mbid)?;
     let mb_recording = fetch_rate_limited(
         &mbid,
         Recording::fetch()
@@ -292,7 +298,8 @@ pub async fn fetch_recording(
     )
     .await?;
 
-    let id = insert_song(&ctx, mbid, mb_recording)?;
+    ctx.write_db(|db| insert_song(db, mbid, mb_recording, true))?;
+    DropGuard::dismiss(guard);
 
-    Ok(id)
+    Ok(())
 }

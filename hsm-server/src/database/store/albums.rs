@@ -10,7 +10,7 @@ slotmap::new_key_type! {
     pub struct AlbumId;
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct DerivedAlbumData {
     pub(super) tracks: Vec<TrackId>,
 }
@@ -20,13 +20,18 @@ impl DerivedAlbumData {
     pub fn songs(&self) -> &Vec<TrackId> {
         &self.tracks
     }
+
+    pub(super) fn clear(&mut self) {
+        self.tracks.clear();
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AlbumData {
     /// The `MusicBrainzId` for this album
     pub mbid: Option<MusicBrainzId>,
     /// Album data derrived other database entries
+    #[serde(skip)]
     pub derived: DerivedAlbumData,
 
     /// Name of the album
@@ -61,13 +66,13 @@ impl DatabaseStore {
                 self.album_by_mbid.insert(mbid, id);
             }
 
-            Self::update_album_artists(&mut self.artists, id, &album, false);
+            Self::update_album_links(&mut self.artists, id, &album, false);
 
             album
         })
     }
 
-    fn update_album_artists(
+    pub(super) fn update_album_links(
         artists: &mut DenseSlotMap<ArtistId, ArtistData>,
         id: AlbumId,
         album: &AlbumData,
@@ -79,7 +84,7 @@ impl DatabaseStore {
             };
 
             if remove {
-                artist.derived.albums.retain(|stored_id| id != *stored_id);
+                artist.derived.albums.retain(|stored_id| *stored_id != id);
             } else if !artist.derived.albums.contains(&id) {
                 artist.derived.albums.push(id);
             }
@@ -101,8 +106,8 @@ impl DatabaseStore {
             .get_mut(id)
             .ok_or(MissingDatabaseId::Album(id))?;
 
-        Self::update_album_artists(&mut self.artists, id, db_album, true);
-        Self::update_album_artists(&mut self.artists, id, &album, false);
+        Self::update_album_links(&mut self.artists, id, db_album, true);
+        Self::update_album_links(&mut self.artists, id, &album, false);
 
         db_album.title = album.title;
         db_album.image = album.image;

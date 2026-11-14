@@ -12,7 +12,7 @@ slotmap::new_key_type! {
     pub struct SongId;
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct DerivedSongData {
     pub(super) tracks: Vec<TrackId>,
 }
@@ -22,13 +22,18 @@ impl DerivedSongData {
     pub fn tracks(&self) -> &Vec<TrackId> {
         &self.tracks
     }
+
+    pub(super) fn clear(&mut self) {
+        self.tracks.clear();
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SongData {
     /// The `MusicBrainzId` for this song
     pub mbid: Option<MusicBrainzId>,
     /// Song data derrived other database entries
+    #[serde(skip)]
     pub derived: DerivedSongData,
 
     /// Name of the song
@@ -61,7 +66,7 @@ impl DatabaseStore {
         self.song_by_mbid.get(mbid).copied()
     }
 
-    fn update_song_artists(
+    pub(super) fn update_song_links(
         artists: &mut DenseSlotMap<ArtistId, ArtistData>,
         id: SongId,
         song: &SongData,
@@ -73,7 +78,7 @@ impl DatabaseStore {
             };
 
             if remove {
-                artist.derived.songs.retain(|stored_id| id != *stored_id);
+                artist.derived.songs.retain(|stored_id| *stored_id != id);
             } else if !artist.derived.songs.contains(&id) {
                 artist.derived.songs.push(id);
             }
@@ -86,7 +91,7 @@ impl DatabaseStore {
                 self.song_by_mbid.insert(mbid, id);
             }
 
-            Self::update_song_artists(&mut self.artists, id, &song, false);
+            Self::update_song_links(&mut self.artists, id, &song, false);
 
             song
         })
@@ -104,8 +109,8 @@ impl DatabaseStore {
 
         let db_song = self.songs.get_mut(id).ok_or(MissingDatabaseId::Song(id))?;
 
-        Self::update_song_artists(&mut self.artists, id, db_song, true);
-        Self::update_song_artists(&mut self.artists, id, &song, false);
+        Self::update_song_links(&mut self.artists, id, db_song, true);
+        Self::update_song_links(&mut self.artists, id, &song, false);
 
         db_song.title = song.title;
         db_song.image = song.image;

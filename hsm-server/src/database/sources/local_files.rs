@@ -10,7 +10,11 @@ use thiserror::Error;
 use crate::database::{
     jobs::JobContext,
     sources::musicbrainz,
-    store::{AlbumData, AlbumId, ArtistData, ArtistId, MusicBrainzId, SongData, SongId},
+    store::{
+        AlbumData, AlbumId, ArtistData, ArtistId, DerivedAlbumData, DerivedArtistData,
+        DerivedSongData, DerivedTrackData, MissingDatabaseId, MusicBrainzId, ResourceLocation,
+        SongData, SongId, TrackData, TrackId,
+    },
 };
 
 const PLUGIN_ID: &str = "local_files";
@@ -25,6 +29,9 @@ pub enum LoadFileError {
 
     #[error("song missing MusicBrainz id")]
     MissingMbid,
+
+    #[error("{0}")]
+    Database(#[from] MissingDatabaseId),
 }
 
 /// Load a `song` from a specified file path
@@ -77,8 +84,12 @@ fn get_artists(ctx: &JobContext, tag: &Tag, album: bool) -> Vec<ArtistId> {
 
             let id = db.insert_artist(ArtistData {
                 mbid: Some(mbid),
+                derived: DerivedArtistData::default(),
+
                 name: name.map(Into::into),
-                ..Default::default()
+                sort_name: None,
+                image: None,
+                genres: Vec::new(),
             });
 
             artists.push(id);
@@ -134,13 +145,15 @@ fn get_album(ctx: &JobContext, tag: &Tag) -> Option<AlbumId> {
     let album = ctx.write_db(|db| {
         db.insert_album(AlbumData {
             mbid: Some(mbid),
+            derived: DerivedAlbumData::default(),
+
             title: name,
+            image: None,
             artists,
             artists_text,
             genres,
             date,
             track_count: song_count,
-            ..Default::default()
         })
     });
 
@@ -188,13 +201,18 @@ fn get_song(ctx: &JobContext, tag: &Tag) -> Option<SongId> {
     let song = ctx.write_db(|db| {
         db.insert_song(SongData {
             mbid: Some(mbid),
+            derived: DerivedSongData::default(),
+
             title: name,
+            image: None,
+            length,
+            date,
+            genres,
+
             artists,
             artists_text,
-            genres,
-            date,
-            length,
-            ..Default::default()
+
+            mix_songs: Vec::new(),
         })
     });
 
@@ -203,18 +221,37 @@ fn get_song(ctx: &JobContext, tag: &Tag) -> Option<SongId> {
     Some(song)
 }
 
-async fn load_song_file(
-    ctx: JobContext,
-    path: PathBuf,
-) -> Result<(Option<SongId>, Option<AlbumId>), LoadFileError> {
-    let (_duration, Some(ref tag)) = parse_file_tags(path).await? else {
+async fn load_song_file(ctx: JobContext, path: PathBuf) -> Result<TrackId, LoadFileError> {
+    let location = ResourceLocation {
+        plugin: PLUGIN_ID.into(),
+        id: path.to_string_lossy().into_owned(),
+    };
+
+    let (length, Some(ref tag)) = parse_file_tags(path).await? else {
         return Err(LoadFileError::MissingMbid);
     };
 
     let song = get_song(&ctx, tag);
     let album = get_album(&ctx, tag);
 
-    Ok((song, album))
+    let title = tag.title().map(Into::into);
+    let track_number = tag.track();
+
+    let track = ctx.write_db(|db| {
+        db.update_or_insert_track(TrackData {
+            location,
+            derived: DerivedTrackData::default(),
+
+            song,
+            album,
+
+            title,
+            length,
+            track_number,
+        })
+    })?;
+
+    Ok(track)
 }
 
 async fn search_directory(ctx: JobContext, path: PathBuf) -> Vec<(PathBuf, LoadFileError)> {

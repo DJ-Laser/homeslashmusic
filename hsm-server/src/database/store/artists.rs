@@ -8,29 +8,35 @@ slotmap::new_key_type! {
     pub struct ArtistId;
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct DerivedArtistData {
-    pub(super) albums: Vec<AlbumId>,
     pub(super) songs: Vec<SongId>,
+    pub(super) albums: Vec<AlbumId>,
 }
 
 impl DerivedArtistData {
+    /// Songs by this artist, unsorted
+    pub fn songs(&self) -> &Vec<SongId> {
+        &self.songs
+    }
+
     /// Albums by this artist, unsorted
     pub fn albums(&self) -> &Vec<AlbumId> {
         &self.albums
     }
 
-    /// Songs by this artist, unsorted
-    pub fn songs(&self) -> &Vec<SongId> {
-        &self.songs
+    pub(super) fn clear(&mut self) {
+        self.songs.clear();
+        self.albums.clear();
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArtistData {
     /// The `MusicBrainzId` for this artist
     pub mbid: Option<MusicBrainzId>,
     /// Artist data derrived other database entries
+    #[serde(skip)]
     pub derived: DerivedArtistData,
 
     /// Name of the artist
