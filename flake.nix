@@ -28,8 +28,18 @@
     };
 
     packages.${system} = {
-      homeslashmusic = pkgs.callPackage ./nix/homeslashmusic.nix {};
+      homeslashmusic = pkgs.callPackage ./nix/homeslashmusic.nix {
+        rustPlatform = pkgs.makeRustPlatform {
+          cargo = rustToolchain;
+          rustc = rustToolchain;
+        };
+      };
       default = self.packages.${system}.homeslashmusic;
+    };
+
+    apps.${system}.build-linux = {
+      type = "app";
+      program = pkgs.writeShellScript "build-linux" (builtins.readFile ./build-linux.sh);
     };
   };
 }
