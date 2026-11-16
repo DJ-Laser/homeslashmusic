@@ -6,6 +6,7 @@ use std::{error::Error, fmt};
 
 use futures_concurrency::future::Race;
 use hsm_ipc::Event;
+use log::error;
 use rodio::OutputStream;
 use smol::channel;
 use thiserror::Error;
@@ -84,7 +85,7 @@ impl AudioServer {
                     let _ = reply_tx.send(reply_data);
 
                     if error.is_recoverable() {
-                        eprintln!("{error}");
+                        error!("{error}");
                     } else {
                         return Err(error);
                     }

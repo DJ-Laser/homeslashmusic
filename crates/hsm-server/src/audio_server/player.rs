@@ -12,21 +12,25 @@ use std::{
     time::Duration,
 };
 
-use controlled_source::{Controls, SeekError, SourceEvent, wrap_source};
 use decoder::TrackDecoder;
 use float_cmp::approx_eq;
 use hsm_ipc::{
     Event, InsertPosition, LoopMode, PlaybackState, SeekPosition, TrackId, TrackMetadata,
 };
-use output::{SourceQueue, SourceQueueState};
+use log::{debug, error};
 use rodio::{Source, mixer::Mixer};
 
 use smol::channel;
 use thiserror::Error;
 use track_list::{ArcTrackInstance, TrackList};
 
-use super::track::LoadTrackError;
-pub use output::PlayerAudioOutput;
+use crate::audio_server::{
+    player::{
+        controlled_source::{Controls, SeekError, SourceEvent, wrap_source},
+        output::{PlayerAudioOutput, SourceQueue, SourceQueueState},
+    },
+    track::LoadTrackError,
+};
 
 #[derive(Debug, Error)]
 pub enum PlayerError {
@@ -215,7 +219,7 @@ impl Player {
 
         if prev_state != new_state {
             self.emit(Event::PlaybackStateChanged(new_state))?;
-            println!("Setting playback state to {new_state:?}");
+            debug!("Setting playback state to {new_state:?}");
         }
 
         Ok(prev_state)
@@ -311,13 +315,13 @@ impl Player {
         self.current_track_index.store(new_index, Ordering::Release);
 
         if should_loop {
-            println!("Track list reached {printed_position}, looping to {printed_loop_position}");
+            debug!("Track list reached {printed_position}, looping to {printed_loop_position}");
 
             if !self.is_stopped().await {
                 self.queue_current_track(false).await?;
             }
         } else {
-            println!("Track list reached {printed_position}, stopping");
+            debug!("Track list reached {printed_position}, stopping");
             self.stop().await?;
         }
 
@@ -378,7 +382,7 @@ impl Player {
             self.current_track_index.store(new_index, Ordering::Release);
 
             self.emit(Event::ShuffleChanged(shuffle))?;
-            println!("Shuffle set to {shuffle}");
+            debug!("Shuffle set to {shuffle}");
 
             if !self.is_stopped().await {
                 let current_track_index = self.current_track_index.load(Ordering::Acquire);
@@ -402,7 +406,7 @@ impl Player {
 
         if loop_mode != prev_mode {
             self.emit(Event::LoopModeChanged(loop_mode))?;
-            println!("Loop mode set to {loop_mode:?}");
+            debug!("Loop mode set to {loop_mode:?}");
         }
 
         Ok(())
@@ -418,7 +422,7 @@ impl Player {
 
         if approx_eq!(f32, clamped_volume, prev_volume) {
             self.emit(Event::VolumeChanged(clamped_volume))?;
-            println!("volume set to {volume:?}");
+            debug!("volume set to {volume:?}");
         }
 
         Ok(())
@@ -436,7 +440,7 @@ impl Player {
         let rx = self.controls.seek(seek_position).await;
 
         rx.await.map_err(|_| SeekError::ErrorChannelClosed)??;
-        println!("Seeked {seek_position:?}");
+        debug!("Seeked {seek_position:?}");
 
         Ok(())
     }
@@ -449,7 +453,7 @@ impl Player {
         self.stop().await?;
         self.tracks.clear().await?;
         self.current_track_index.store(0, Ordering::Release);
-        println!("Clearing track list");
+        debug!("Clearing track list");
 
         Ok(())
     }
@@ -492,14 +496,14 @@ impl Player {
                 && let Err(error) = self.go_to_next_track().await
             {
                 if error.is_recoverable() {
-                    eprintln!("{error}");
+                    error!("{error}");
                 } else {
                     return Err(error);
                 }
             }
 
             match event {
-                SourceEvent::LoopError(error) => eprintln!("Error looping source: {error}"),
+                SourceEvent::LoopError(error) => error!("Error looping source: {error}"),
                 SourceEvent::Seeked(position) => self.emit(Event::Seeked(position))?,
                 _ => (),
             }

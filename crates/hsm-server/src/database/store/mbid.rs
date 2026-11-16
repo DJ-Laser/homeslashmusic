@@ -1,5 +1,6 @@
 use std::{collections::HashMap, fmt::Display, mem::DropGuard};
 
+use log::error;
 use serde::{Deserialize, Serialize};
 use smol::channel::Receiver;
 
@@ -130,7 +131,7 @@ pub async fn fetch_incomplete_mbids(ctx: JobContext, waker: Receiver<()>) {
             Ok(()) => ctx.write_db(|db| db.complete_mbid_query(mbid)),
             Err(err) => {
                 ctx.write_db(|db| db.mbid_query_state.fail(mbid));
-                eprintln!("Failed to fetch musicbrainz: {err}");
+                error!("Failed to fetch musicbrainz: {err}");
             }
         }
 

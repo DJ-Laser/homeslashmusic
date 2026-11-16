@@ -3,8 +3,9 @@ use std::{path::PathBuf, time::Duration};
 use hsm_ipc::{
     LoopMode, PlaybackState, SeekPosition, TrackId, TrackInstance, requests, server::RequestHandler,
 };
+use log::{debug, error};
 
-use super::{AudioServer, AudioServerError};
+use crate::audio_server::{AudioServer, AudioServerError};
 
 impl RequestHandler for AudioServer {
     type Error = AudioServerError;
@@ -202,15 +203,15 @@ impl RequestHandler for AudioServer {
             set_as_current,
         }: requests::LoadTracks,
     ) -> Result<Vec<(PathBuf, String)>, Self::Error> {
-        println!("Loading tracks: {paths:?}");
+        debug!("Loading tracks: {paths:?}");
         let (tracks, errors) = self.track_cache.get_or_load_tracks(paths).await;
 
         for (path, error) in &errors {
-            eprintln!("Could not load track {}: {error}", path.display());
+            error!("Could not load track {}: {error}", path.display());
         }
 
         for track in &tracks {
-            println!("Loaded track {}", track.file_path.display());
+            debug!("Loaded track {}", track.file_path.display());
         }
 
         (self

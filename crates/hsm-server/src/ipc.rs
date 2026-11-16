@@ -4,6 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use log::error;
 use smol::{
     io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::unix::{UnixListener, UnixStream},
@@ -62,7 +63,7 @@ pub async fn run_ipc_server(handle: AppHandle) -> Result<(), IpcServerError> {
                 };
 
                 if let Err(error) = res {
-                    eprintln!("failed to connect to ipc client: {error}");
+                    error!("failed to connect to ipc client: {error}");
                 }
             })
             .detach();

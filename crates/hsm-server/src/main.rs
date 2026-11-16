@@ -11,6 +11,7 @@ use hsm_ipc::{
     Event, Reply, Request,
     client::{deserialize_reply, serialize_request},
 };
+use log::{error, info};
 use smol::{Executor, channel};
 use thiserror::Error;
 
@@ -134,13 +135,13 @@ async fn run_servers(executor: Arc<Executor<'static>>) -> Result<(), MainError> 
 }
 
 fn main() {
-    let executor: Arc<Executor<'static>> = Arc::new(Executor::new());
-    if false {
-        match smol::block_on(executor.run(run_servers(executor.clone()))) {
-            Ok(()) => (),
-            Err(error) => eprintln!("{error}"),
-        }
+    env_logger::init();
 
-        println!("hsm-server shutting down");
+    let executor: Arc<Executor<'static>> = Arc::new(Executor::new());
+    match smol::block_on(executor.run(run_servers(executor.clone()))) {
+        Ok(()) => (),
+        Err(error) => error!("{error}"),
     }
+
+    info!("hsm-server shutting down");
 }

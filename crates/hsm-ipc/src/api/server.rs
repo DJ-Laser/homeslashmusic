@@ -9,7 +9,6 @@ pub async fn handle_request<R: RequestHandler>(
     let request = match serde_json::from_str(request_data) {
         Ok(request) => request,
         Err(error) => {
-            println!("{error}");
             return Ok(crate::server::serialize_error(&error));
         }
     };

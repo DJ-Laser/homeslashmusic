@@ -6,12 +6,6 @@ edition.workspace = true
 [dependencies]
 hsm-ipc.workspace = true
 
-smol.workspace = true
-async-signal.workspace = true
-async-oneshot.workspace = true
-async-broadcast.workspace = true
-futures-concurrency.workspace = true
-
 rand.workspace = true
 uuid.workspace = true
 serde.workspace = true
@@ -19,6 +13,15 @@ dashmap.workspace = true
 slotmap.workspace = true
 float-cmp.workspace = true
 thiserror.workspace = true
+
+log.workspace = true
+env_logger.workspace = true
+
+smol.workspace = true
+async-signal.workspace = true
+async-oneshot.workspace = true
+async-broadcast.workspace = true
+futures-concurrency.workspace = true
 
 lofty.workspace = true
 rodio.workspace = true
