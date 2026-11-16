@@ -1,18 +1,17 @@
 use std::{
     fs,
+    mem::DropGuard,
     path::{Path, PathBuf},
-    sync::Arc,
 };
 
 use smol::{
-    Executor,
     io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::unix::{UnixListener, UnixStream},
     stream::StreamExt,
 };
 use thiserror::Error;
 
-use crate::plugin_manager::{Plugin, RequestSender};
+use crate::{AppHandle, ipc::IpcServerError::ListenerClosed};
 
 #[derive(Debug, Error)]
 pub enum IpcServerError {
@@ -26,104 +25,61 @@ pub enum IpcServerError {
 
     #[error("Failed to create ipc socket: {0}")]
     FailedToCreateSocket(#[source] io::Error),
+
+    #[error("Listener unexpectedly closed")]
+    ListenerClosed,
 }
 
-pub struct IpcPlugin<'ex, Tx> {
-    socket_path: PathBuf,
-    request_tx: Tx,
-    executor: Arc<Executor<'ex>>,
+fn is_socket_in_use(socket_path: &Path) -> Result<bool, IpcServerError> {
+    let socket_in_use = fs::exists(socket_path).map_err(IpcServerError::CheckSocketFileFailed)?;
+    Ok(socket_in_use)
 }
 
-impl<Tx> IpcPlugin<'_, Tx> {
-    fn is_socket_in_use(socket_path: &Path) -> Result<bool, IpcServerError> {
-        let socket_in_use =
-            fs::exists(socket_path).map_err(IpcServerError::CheckSocketFileFailed)?;
-        Ok(socket_in_use)
-    }
-
-    fn cleanup_socket(&self) {
-        let _ = fs::remove_file(&self.socket_path);
-        println!("Removing socket: {}", self.socket_path.display());
-    }
+fn cleanup_socket(socket_path: &Path) {
+    let _ = fs::remove_file(socket_path);
 }
 
-impl<'ex, Tx: RequestSender + Send + Sync + Clone + 'ex> Plugin<'ex, Tx> for IpcPlugin<'ex, Tx> {
-    type Error = IpcServerError;
-
-    async fn init(request_tx: Tx, executor: Arc<Executor<'ex>>) -> Result<Self, Self::Error>
-    where
-        Self: Sized,
-    {
-        let socket_path = PathBuf::from(hsm_ipc::socket_path());
-        if Self::is_socket_in_use(&socket_path)? {
-            return Err(IpcServerError::SocketInUse);
-        }
-
-        Ok(Self {
-            socket_path,
-            request_tx,
-            executor,
-        })
+pub async fn run_ipc_server(handle: AppHandle) -> Result<(), IpcServerError> {
+    let socket_path = PathBuf::from(hsm_ipc::socket_path());
+    if is_socket_in_use(&socket_path)? {
+        return Err(IpcServerError::SocketInUse);
     }
 
-    async fn on_event(&self, _event: hsm_ipc::Event) -> Result<(), Self::Error> {
-        Ok(())
+    let listener = DropGuard::new(
+        UnixListener::bind(&socket_path).map_err(IpcServerError::FailedToCreateSocket)?,
+        |_| cleanup_socket(&socket_path),
+    );
+
+    while let Some(stream) = listener.incoming().next().await {
+        let stream_handle = handle.clone();
+        handle
+            .executor()
+            .spawn(async {
+                let res = if let Ok(stream) = stream {
+                    handle_stream(stream_handle, stream).await
+                } else {
+                    stream.map(|_| ())
+                };
+
+                if let Err(error) = res {
+                    eprintln!("failed to connect to ipc client: {error}");
+                }
+            })
+            .detach();
     }
 
-    async fn run(&self) -> Result<(), Self::Error> {
-        let listener =
-            UnixListener::bind(&self.socket_path).map_err(IpcServerError::FailedToCreateSocket)?;
-
-        while let Some(stream) = listener.incoming().next().await {
-            let request_tx = self.request_tx.clone();
-
-            self.executor
-                .spawn(async {
-                    let res = if let Ok(stream) = stream {
-                        StreamHandler::new(request_tx).handle_stream(stream).await
-                    } else {
-                        stream.map(|_| ())
-                    };
-
-                    if let Err(error) = res {
-                        eprintln!("failed to connect to ipc client: {error}");
-                    }
-                })
-                .detach();
-        }
-
-        self.cleanup_socket();
-        unreachable!("Iterating over Incoming should never return None")
-    }
+    Err(ListenerClosed)
 }
 
-impl<Tx> Drop for IpcPlugin<'_, Tx> {
-    fn drop(&mut self) {
-        self.cleanup_socket();
-    }
-}
+async fn handle_stream(handle: AppHandle, stream: UnixStream) -> io::Result<()> {
+    let mut request_data = String::new();
+    let mut stream_reader = BufReader::new(stream);
+    stream_reader.read_line(&mut request_data).await?;
 
-struct StreamHandler<Tx> {
-    request_tx: Tx,
-}
+    let reply_data = handle.send_json(request_data).await;
 
-impl<Tx> StreamHandler<Tx> {
-    fn new(request_tx: Tx) -> Self {
-        Self { request_tx }
-    }
-}
+    let mut stream = stream_reader.into_inner();
+    stream.write_all(reply_data.as_bytes()).await?;
 
-impl<Tx: RequestSender> StreamHandler<Tx> {
-    async fn handle_stream(&self, stream: UnixStream) -> io::Result<()> {
-        let mut request_data = String::new();
-        let mut stream_reader = BufReader::new(stream);
-        stream_reader.read_line(&mut request_data).await?;
-
-        let reply_data = self.request_tx.send_json(request_data).await;
-
-        let mut stream = stream_reader.into_inner();
-        stream.write_all(reply_data.as_bytes()).await?;
-
-        Ok(())
-    }
+    Ok(())
 }

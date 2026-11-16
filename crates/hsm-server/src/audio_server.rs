@@ -4,16 +4,16 @@ mod track;
 
 use std::{error::Error, fmt};
 
-use super::plugin_manager::RequestJson;
 use futures_concurrency::future::Race;
 use hsm_ipc::Event;
 use rodio::OutputStream;
-use smol::channel::{Receiver, Sender};
-
-use player::Player;
-
+use smol::channel;
 use thiserror::Error;
-use track::TrackCache;
+
+use crate::{
+    RequestJson,
+    audio_server::{player::Player, track::TrackCache},
+};
 
 #[derive(Debug, Error)]
 pub enum AudioServerError {
@@ -46,12 +46,15 @@ pub struct AudioServer {
     /// Mapping from cannonical path to track
     track_cache: TrackCache,
 
-    request_data_rx: Receiver<RequestJson>,
+    request_data_rx: channel::Receiver<RequestJson>,
 }
 
 impl AudioServer {
     pub fn init(
-        (request_data_rx, event_tx): (Receiver<RequestJson>, Sender<Event>),
+        (request_data_rx, event_tx): (
+            channel::Receiver<RequestJson>,
+            async_broadcast::Sender<Event>,
+        ),
     ) -> Result<Self, AudioServerError> {
         let output_stream = rodio::OutputStreamBuilder::open_default_stream()?;
 

@@ -4,28 +4,25 @@ use mpris_server::{
     PlayerInterface, RootInterface, TrackListInterface,
     zbus::{self, fdo},
 };
-use smol::channel::{self, Sender};
+use smol::channel::{self};
 
 use crate::{
+    AppHandle,
     mpris::conversions::{
         as_dbus_time, as_loop_status, as_playback_status, decode_file_url, from_dbus_time,
         from_dbus_track_id, from_loop_status, from_real_dbus_track_id, generate_empty_metadata,
         generate_metadata, into_dbus_track_id,
     },
-    plugin_manager::RequestSender,
 };
 
-pub struct MprisImpl<Tx> {
-    request_tx: Tx,
-    quit_tx: Sender<()>,
+pub struct MprisImpl {
+    handle: AppHandle,
+    quit_tx: channel::Sender<()>,
 }
 
-impl<Tx> MprisImpl<Tx> {
-    pub fn new(request_tx: Tx, quit_tx: channel::Sender<()>) -> Self {
-        Self {
-            request_tx,
-            quit_tx,
-        }
+impl MprisImpl {
+    pub fn new(handle: AppHandle, quit_tx: channel::Sender<()>) -> Self {
+        Self { handle, quit_tx }
     }
 
     fn unsupported<T>(message: &str) -> fdo::Result<T> {
@@ -41,12 +38,12 @@ impl<Tx> MprisImpl<Tx> {
     }
 }
 
-impl<Tx: RequestSender + Send + Sync> MprisImpl<Tx> {
+impl MprisImpl {
     async fn try_send<R: Request>(&self, request: R) -> fdo::Result<R::Response>
     where
         R::Response: Send,
     {
-        self.request_tx
+        self.handle
             .send_request(request)
             .await
             .map_err(Self::channel_closed_error)
@@ -77,7 +74,7 @@ impl<Tx: RequestSender + Send + Sync> MprisImpl<Tx> {
     }
 }
 
-impl<Tx: RequestSender + Send + Sync> RootInterface for MprisImpl<Tx> {
+impl RootInterface for MprisImpl {
     async fn raise(&self) -> fdo::Result<()> {
         Self::unsupported("Raise is not supported")
     }
@@ -137,7 +134,7 @@ impl<Tx: RequestSender + Send + Sync> RootInterface for MprisImpl<Tx> {
     }
 }
 
-impl<Tx: RequestSender + Send + Sync> PlayerInterface for MprisImpl<Tx> {
+impl PlayerInterface for MprisImpl {
     async fn next(&self) -> fdo::Result<()> {
         self.try_send(requests::GoToNextTrack).await
     }
@@ -299,7 +296,7 @@ impl<Tx: RequestSender + Send + Sync> PlayerInterface for MprisImpl<Tx> {
     }
 }
 
-impl<Tx: RequestSender + Send + Sync> TrackListInterface for MprisImpl<Tx> {
+impl TrackListInterface for MprisImpl {
     async fn get_tracks_metadata(
         &self,
         track_ids: Vec<mpris_server::TrackId>,

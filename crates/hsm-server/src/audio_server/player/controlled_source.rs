@@ -1,6 +1,5 @@
 use std::{sync::Arc, time::Duration};
 
-use async_oneshot as oneshot;
 use hsm_ipc::SeekPosition;
 use rodio::{
     Source,
@@ -23,7 +22,7 @@ struct ControlsInner {
     pub volume: f32,
     pub to_skip: usize,
     pub position: Duration,
-    pub seek_position: Option<(SeekPosition, oneshot::Sender<SeekResult>)>,
+    pub seek_position: Option<(SeekPosition, async_oneshot::Sender<SeekResult>)>,
 }
 
 #[derive(Debug)]
@@ -85,8 +84,8 @@ impl Controls {
         self.lock().await.position = Duration::ZERO;
     }
 
-    pub async fn seek(&self, seek_position: SeekPosition) -> oneshot::Receiver<SeekResult> {
-        let (tx, rx) = oneshot::oneshot();
+    pub async fn seek(&self, seek_position: SeekPosition) -> async_oneshot::Receiver<SeekResult> {
+        let (tx, rx) = async_oneshot::oneshot();
         self.lock().await.seek_position = Some((seek_position, tx));
         rx
     }

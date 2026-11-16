@@ -20,8 +20,8 @@ use hsm_ipc::{
 };
 use output::{SourceQueue, SourceQueueState};
 use rodio::{Source, mixer::Mixer};
-use smol::channel::{self, Receiver, Sender};
 
+use smol::channel;
 use thiserror::Error;
 use track_list::{ArcTrackInstance, TrackList};
 
@@ -62,19 +62,19 @@ pub struct Player {
     controls: Arc<Controls>,
     source_queue: Arc<SourceQueue>,
 
-    event_tx: Sender<Event>,
-    source_tx: Sender<SourceEvent>,
-    source_rx: Receiver<SourceEvent>,
+    event_tx: async_broadcast::Sender<Event>,
+    source_tx: channel::Sender<SourceEvent>,
+    source_rx: channel::Receiver<SourceEvent>,
 }
 
 impl Player {
-    pub fn connect_new(event_tx: Sender<Event>, mixer: &Mixer) -> Self {
+    pub fn connect_new(event_tx: async_broadcast::Sender<Event>, mixer: &Mixer) -> Self {
         let (player, source) = Self::new(event_tx);
         mixer.add(source);
         player
     }
 
-    pub fn new(event_tx: Sender<Event>) -> (Self, PlayerAudioOutput) {
+    pub fn new(event_tx: async_broadcast::Sender<Event>) -> (Self, PlayerAudioOutput) {
         let (source_tx, source_rx) = channel::unbounded();
 
         let player = Self {
@@ -96,7 +96,8 @@ impl Player {
 
     fn emit(&self, event: Event) -> Result<(), PlayerError> {
         self.event_tx
-            .try_send(event)
+            .try_broadcast(event)
+            .map(|_| ())
             .map_err(|_| PlayerError::EventChannelClosed)
     }
 
