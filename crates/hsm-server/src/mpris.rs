@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 use conversions::{as_dbus_time, as_loop_status, as_playback_status};
 use hsm_ipc::Event;
-use hsm_plugin::{Plugin, RequestSender};
 use mpris_impl::MprisImpl;
 use mpris_server::{
     Property, Server, Signal,
@@ -17,11 +16,14 @@ use smol::{
 };
 use thiserror::Error;
 
+use crate::plugin_manager::{Plugin, RequestSender};
+
 #[derive(Debug, Error)]
 pub enum MprisServerError {
     #[error("Mpris server error: {0}")]
     DBus(#[from] zbus::Error),
 
+    #[expect(dead_code)]
     #[error("Event channel closed")]
     EventChannelClosed,
 }

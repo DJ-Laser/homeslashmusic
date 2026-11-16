@@ -1,12 +1,9 @@
 [workspace]
 resolver = "3"
 members = [
-  "hsm-server",
-  "hsm-cli",
-  "core/ipc",
-  "core/plugin",
-  "plugins/mpris",
-  "plugins/ipc",
+  "crates/hsm-ipc",
+  "crates/hsm-server",
+  "crates/hsm-cli",
 ]
 
 [workspace.package]
@@ -14,11 +11,7 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace.dependencies]
-hsm-ipc = { path = "./core/ipc" }
-hsm-plugin = { path = "./core/plugin" }
-
-hsm-plugin-mpris = { path = "./plugins/mpris" }
-hsm-plugin-ipc = { path = "./plugins/ipc" }
+hsm-ipc = { path = "./crates/hsm-ipc" }
 
 rodio = { version = "0.21.1", default-features = false, features = ["playback", "symphonia"] }
 symphonia = { version = "0.5.4", features = ["mp3", "isomp4", "aac"] }
@@ -39,6 +32,7 @@ uuid = { version = "1.29.2", features = ["serde"] }
 slotmap = { version = "1.1.1", features = ["serde"] }
 musicbrainz_rs = { version = "0.14.0", features = ["async", "rustls"] }
 governor = "0.8"
+mpris-server = "0.11.0"
 
 serde = { version = "1.0.221", features = ["derive"] }
 serde_json = "1.0.140"

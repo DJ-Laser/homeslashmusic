@@ -3,18 +3,8 @@ name = "hsm-server"
 version.workspace = true
 edition.workspace = true
 
-[features]
-default = ["hsm-plugin-mpris", "hsm-plugin-ipc"]
-
-hsm-plugin-mpris = ["dep:hsm-plugin-mpris"]
-hsm-plugin-ipc = ["dep:hsm-plugin-ipc"]
-
 [dependencies]
 hsm-ipc.workspace = true
-hsm-plugin.workspace = true
-
-hsm-plugin-mpris = { workspace = true, optional = true }
-hsm-plugin-ipc = { workspace = true, optional = true }
 
 rodio.workspace = true
 symphonia.workspace = true
@@ -33,6 +23,7 @@ serde.workspace = true
 uuid.workspace = true
 musicbrainz_rs.workspace = true
 governor.workspace = true
+mpris-server.workspace = true
 
 [lints]
 workspace = true

@@ -1,15 +1,50 @@
-use std::sync::Arc;
+use std::{error::Error, sync::Arc};
 
 use async_oneshot as oneshot;
 use futures_concurrency::future::Race;
-use hsm_ipc::Event;
-use hsm_plugin::Plugin;
+use hsm_ipc::{
+    Event, Reply, Request,
+    client::{deserialize_reply, serialize_request},
+};
 use smol::{
     Executor,
     channel::{self, Receiver, Sender},
     lock::Mutex,
 };
 use thiserror::Error;
+
+async fn send_request<R: Request>(sender: &(impl RequestSender + ?Sized), request: R) -> Reply<R> {
+    let reply_data = sender.send_json(serialize_request(request)).await;
+    deserialize_reply::<R>(&reply_data).expect("Hsm plugins should not fail json parsing")
+}
+
+pub trait RequestSender {
+    fn send_json(&self, request_data: String) -> impl Future<Output = String> + Send + Sync;
+
+    fn send_request<R: Request>(&self, request: R) -> impl Future<Output = Reply<R>> + Send + Sync
+    where
+        Self: Send + Sync,
+    {
+        send_request(self, request)
+    }
+}
+
+/// An ipc client that is compiled into the `hsm-server` binary
+/// Communication is done via channels instead of json.
+pub trait Plugin<'ex, Tx: RequestSender> {
+    type Error: Error + 'static;
+
+    fn init(
+        request_tx: Tx,
+        executor: Arc<Executor<'ex>>,
+    ) -> impl Future<Output = Result<Self, Self::Error>> + Send
+    where
+        Self: Sized;
+
+    fn on_event(&self, event: Event) -> impl Future<Output = Result<(), Self::Error>> + Send;
+
+    fn run(&self) -> impl Future<Output = Result<(), Self::Error>> + Send;
+}
 
 #[derive(Debug, Error)]
 pub enum PluginError {
@@ -23,11 +58,11 @@ pub enum PluginError {
 pub type RequestJson = (String, oneshot::Sender<String>);
 
 #[derive(Debug, Clone)]
-pub struct RequestSender {
+pub struct RequestSenderChannel {
     request_data_tx: Sender<RequestJson>,
 }
 
-impl hsm_plugin::RequestSender for RequestSender {
+impl RequestSender for RequestSenderChannel {
     async fn send_json(&self, request_data: String) -> String {
         let (reply_tx, reply_rx) = oneshot::oneshot();
 
@@ -46,7 +81,7 @@ pub struct PluginRunner<P> {
     event_rx: Receiver<Event>,
 }
 
-impl<'ex, P: Plugin<'ex, RequestSender>> PluginRunner<P> {
+impl<'ex, P: Plugin<'ex, RequestSenderChannel>> PluginRunner<P> {
     fn map_error(error: P::Error) -> PluginError {
         PluginError::PluginError(Box::new(error))
     }
@@ -100,13 +135,13 @@ impl<'ex> PluginManager<'ex> {
         )
     }
 
-    pub fn request_sender(&self) -> RequestSender {
-        RequestSender {
+    pub fn request_sender(&self) -> RequestSenderChannel {
+        RequestSenderChannel {
             request_data_tx: self.request_data_tx.clone(),
         }
     }
 
-    pub async fn load_plugin<P: Plugin<'ex, RequestSender>>(
+    pub async fn load_plugin<P: Plugin<'ex, RequestSenderChannel>>(
         &self,
     ) -> Result<PluginRunner<P>, PluginError> {
         let plugin = P::init(self.request_sender(), self.executor.clone())

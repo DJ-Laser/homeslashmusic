@@ -6,7 +6,7 @@ use std::{
 };
 
 use hsm_ipc::{LoopMode, PlaybackState, TrackId, TrackInstance};
-use mpris_server::zbus::{fdo, zvariant::ObjectPath};
+use mpris_server::zbus::{ObjectPath, fdo};
 
 pub fn as_playback_status(playback_state: PlaybackState) -> mpris_server::PlaybackStatus {
     match playback_state {

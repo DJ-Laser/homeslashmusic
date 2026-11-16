@@ -4,7 +4,6 @@ use std::{
     sync::Arc,
 };
 
-use hsm_plugin::{Plugin, RequestSender};
 use smol::{
     Executor,
     io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader},
@@ -12,6 +11,8 @@ use smol::{
     stream::StreamExt,
 };
 use thiserror::Error;
+
+use crate::plugin_manager::{Plugin, RequestSender};
 
 #[derive(Debug, Error)]
 pub enum IpcServerError {

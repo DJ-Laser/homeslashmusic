@@ -1,19 +1,18 @@
 use float_cmp::approx_eq;
 use hsm_ipc::{InsertPosition, Request, SeekOffset, TrackId, requests};
-use hsm_plugin::RequestSender;
 use mpris_server::{
     PlayerInterface, RootInterface, TrackListInterface,
     zbus::{self, fdo},
 };
 use smol::channel::{self, Sender};
 
-use crate::conversions::{
-    from_dbus_track_id, from_real_dbus_track_id, generate_empty_metadata, into_dbus_track_id,
-};
-
-use super::conversions::{
-    as_dbus_time, as_loop_status, as_playback_status, decode_file_url, from_dbus_time,
-    from_loop_status, generate_metadata,
+use crate::{
+    mpris::conversions::{
+        as_dbus_time, as_loop_status, as_playback_status, decode_file_url, from_dbus_time,
+        from_dbus_track_id, from_loop_status, from_real_dbus_track_id, generate_empty_metadata,
+        generate_metadata, into_dbus_track_id,
+    },
+    plugin_manager::RequestSender,
 };
 
 pub struct MprisImpl<Tx> {
