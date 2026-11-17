@@ -14,8 +14,8 @@ use std::{
 use decoder::TrackDecoder;
 use float_cmp::approx_eq;
 use hsm_ipc::{
-    Event, InsertPosition, LoopMode, PlaybackState, SeekOffset, SeekPosition, TrackId,
-    TrackMetadata,
+    Event, InsertPosition, LoopMode, PlaybackState, QueueItemId, QueuedTrackMetadata, SeekOffset,
+    SeekPosition,
 };
 use log::{debug, error};
 use rodio::mixer::Mixer;
@@ -46,7 +46,7 @@ pub enum PlayerError {
     LoadTrack(#[from] LoadTrackError),
 
     #[error("Track id {0} not in track list")]
-    TrackIdNotFound(TrackId),
+    TrackIdNotFound(QueueItemId),
 
     #[error("failed to seek: ")]
     SeekFailed(#[from] SeekError),
@@ -126,7 +126,7 @@ impl Player {
 
     /// If `wait_for_empty_queue` is true, this function will loop until the queue become open for replacement
     /// If it is not ensured that the queue is empty beforehand it can cause an infinite loop and lockup
-    async fn queue_track(&self, track: &Arc<TrackMetadata>, wait_for_empty_queue: bool) {
+    async fn queue_track(&self, track: &Arc<QueuedTrackMetadata>, wait_for_empty_queue: bool) {
         let decoder = match TrackDecoder::new(track.file_path.clone()).await {
             Ok(source) => source,
             Err(error) => {
@@ -264,7 +264,7 @@ impl Player {
             .get_track_at(self.current_track_index.load(Ordering::Acquire))
     }
 
-    pub async fn go_to_track(&self, track_id: TrackId) -> bool {
+    pub async fn go_to_track(&self, track_id: QueueItemId) -> bool {
         let Some(track_index) = self.tracks.get_track_index(track_id) else {
             return false;
         };
@@ -437,7 +437,7 @@ impl Player {
 
     pub async fn seek_to(
         &self,
-        track_id: TrackId,
+        track_id: QueueItemId,
         position: Duration,
     ) -> Result<bool, PlayerError> {
         if let Some(track) = self.current_track()
@@ -466,7 +466,7 @@ impl Player {
     pub async fn insert_tracks(
         &self,
         position: InsertPosition,
-        tracks: &[Arc<TrackMetadata>],
+        tracks: &[Arc<QueuedTrackMetadata>],
         set_as_current: bool,
     ) -> Result<(), PlayerError> {
         let current_index = self.current_track_index.load(Ordering::Acquire);

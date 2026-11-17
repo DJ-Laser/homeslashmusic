@@ -6,7 +6,7 @@ use std::{
     },
 };
 
-use hsm_ipc::{InsertPosition, TrackId, TrackInstance, TrackMetadata};
+use hsm_ipc::{InsertPosition, QueueItemId, QueuedTrack, QueuedTrackMetadata};
 use rand::{Rng, seq::SliceRandom};
 
 use super::PlayerError;
@@ -14,15 +14,15 @@ use super::PlayerError;
 /// A `LoadedTrack` with a `track_id` to uniquely identify it
 #[derive(Debug, Clone)]
 pub struct ArcTrackInstance {
-    pub id: TrackId,
-    pub metadata: Arc<TrackMetadata>,
+    pub id: QueueItemId,
+    pub metadata: Arc<QueuedTrackMetadata>,
 }
 
 impl ArcTrackInstance {
-    pub fn clone_owned_instance(&self) -> TrackInstance {
-        TrackInstance {
+    pub fn clone_owned_instance(&self) -> QueuedTrack {
+        QueuedTrack {
             id: self.id,
-            metadata: TrackMetadata::clone(&self.metadata),
+            metadata: QueuedTrackMetadata::clone(&self.metadata),
         }
     }
 }
@@ -32,7 +32,7 @@ impl ArcTrackInstance {
 struct TrackListInner {
     track_list: Vec<ArcTrackInstance>,
     shuffled_track_indicies: Vec<usize>,
-    latest_track_id: TrackId,
+    latest_track_id: QueueItemId,
 }
 
 impl TrackListInner {
@@ -63,7 +63,7 @@ impl TrackListInner {
     pub fn insert_tracks(
         &mut self,
         index: usize,
-        tracks: &[Arc<TrackMetadata>],
+        tracks: &[Arc<QueuedTrackMetadata>],
     ) -> impl Iterator<Item = usize> {
         debug_assert_eq!(self.track_list.len(), self.shuffled_track_indicies.len());
 
@@ -153,7 +153,7 @@ impl TrackList {
         self.len.load(Ordering::Acquire)
     }
 
-    pub fn get_track_index(&self, track_id: TrackId) -> Option<usize> {
+    pub fn get_track_index(&self, track_id: QueueItemId) -> Option<usize> {
         let inner = self.inner.lock().unwrap();
         (0..inner.len()).find(|&index| inner[index].id == track_id)
     }
@@ -229,7 +229,7 @@ impl TrackList {
         &self,
         current_index: usize,
         position: InsertPosition,
-        tracks: &[Arc<TrackMetadata>],
+        tracks: &[Arc<QueuedTrackMetadata>],
         set_as_current: bool,
     ) -> Result<usize, PlayerError> {
         let mut inner = self.inner.lock().unwrap();

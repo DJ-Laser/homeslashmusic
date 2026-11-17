@@ -1,5 +1,5 @@
 use float_cmp::approx_eq;
-use hsm_ipc::{InsertPosition, SeekOffset, TrackId};
+use hsm_ipc::{InsertPosition, SeekOffset, QueueItemId};
 use mpris_server::{
     PlayerInterface, RootInterface, TrackListInterface,
     zbus::{self, fdo},
@@ -295,7 +295,7 @@ impl TrackListInterface for MprisImpl {
         let track_ids = track_ids
             .iter()
             .map(from_real_dbus_track_id)
-            .collect::<Result<Vec<TrackId>, _>>()?;
+            .collect::<Result<Vec<QueueItemId>, _>>()?;
 
         let mut tracks = self.handle.player.get_tracks();
 

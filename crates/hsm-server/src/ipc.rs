@@ -6,7 +6,8 @@ use std::{
 };
 
 use hsm_ipc::{
-    LoopMode, PlaybackState, SeekPosition, TrackId, TrackInstance, requests, server::RequestHandler,
+    LoopMode, PlaybackState, QueuedTrack, QueuedTrackId, SeekPosition, requests,
+    server::RequestHandler,
 };
 use log::{debug, error};
 use smol::{
@@ -105,14 +106,14 @@ impl RequestHandler for AppHandle {
 
     async fn handle_query_version(
         &self,
-        _request: requests::QueryVersion,
+        _request: requests::GetVersion,
     ) -> Result<hsm_ipc::Version, Self::Error> {
         Ok(hsm_ipc::version())
     }
 
     async fn handle_query_playback_state(
         &self,
-        _request: requests::QueryPlaybackState,
+        _request: requests::GetPlaybackState,
     ) -> Result<PlaybackState, Self::Error> {
         Ok(self.player.playback_state())
     }
@@ -145,8 +146,8 @@ impl RequestHandler for AppHandle {
 
     async fn handle_query_current_track(
         &self,
-        _request: requests::QueryCurrentTrack,
-    ) -> Result<Option<TrackInstance>, Self::Error> {
+        _request: requests::GetCurrentQueuedTrack,
+    ) -> Result<Option<QueuedTrack>, Self::Error> {
         let current_track = self.player.current_track();
         let current_track = current_track.map(|track| track.clone_owned_instance());
 
@@ -155,8 +156,8 @@ impl RequestHandler for AppHandle {
 
     async fn handle_query_current_track_id(
         &self,
-        _request: requests::QueryCurrentTrackId,
-    ) -> Result<Option<TrackId>, Self::Error> {
+        _request: requests::GetCurrentQueuedTrackId,
+    ) -> Result<Option<QueuedTrackId>, Self::Error> {
         let current_track = self.player.current_track();
         let current_track_id = current_track.map(|track| track.id);
 
@@ -193,7 +194,7 @@ impl RequestHandler for AppHandle {
 
     async fn handle_query_loop_mode(
         &self,
-        _request: requests::QueryLoopMode,
+        _request: requests::GetLoopMode,
     ) -> Result<LoopMode, Self::Error> {
         Ok(self.player.loop_mode())
     }
@@ -208,7 +209,7 @@ impl RequestHandler for AppHandle {
 
     async fn handle_query_shuffle(
         &self,
-        _request: requests::QueryShuffle,
+        _request: requests::GetShuffle,
     ) -> Result<bool, Self::Error> {
         Ok(self.player.shuffle())
     }
@@ -221,10 +222,7 @@ impl RequestHandler for AppHandle {
         Ok(())
     }
 
-    async fn handle_query_volume(
-        &self,
-        _request: requests::QueryVolume,
-    ) -> Result<f32, Self::Error> {
+    async fn handle_query_volume(&self, _request: requests::GetVolume) -> Result<f32, Self::Error> {
         Ok(self.player.volume())
     }
 
@@ -238,7 +236,7 @@ impl RequestHandler for AppHandle {
 
     async fn handle_query_position(
         &self,
-        _request: requests::QueryPosition,
+        _request: requests::GetPosition,
     ) -> Result<Duration, Self::Error> {
         Ok(self.player.position())
     }
@@ -268,8 +266,8 @@ impl RequestHandler for AppHandle {
 
     async fn handle_query_queue_tracks(
         &self,
-        _request: requests::QueryQueueTracks,
-    ) -> Result<Vec<TrackInstance>, Self::Error> {
+        _request: requests::GetQueuedTracks,
+    ) -> Result<Vec<QueuedTrack>, Self::Error> {
         let tracks = self.player.get_tracks();
         let tracks = tracks
             .into_iter()
@@ -281,18 +279,15 @@ impl RequestHandler for AppHandle {
 
     async fn handle_query_queue_track_ids(
         &self,
-        _request: requests::QueryQueueTrackIds,
-    ) -> Result<Vec<TrackId>, Self::Error> {
+        _request: requests::GetQueuedTrackIds,
+    ) -> Result<Vec<QueuedTrackId>, Self::Error> {
         let tracks = self.player.get_tracks();
         let track_ids = tracks.into_iter().map(|track| track.id).collect();
 
         Ok(track_ids)
     }
 
-    async fn handle_clear_tracks(
-        &self,
-        _request: requests::ClearTracks,
-    ) -> Result<(), Self::Error> {
+    async fn handle_clear_tracks(&self, _request: requests::ClearQueue) -> Result<(), Self::Error> {
         self.player.clear_tracks();
         Ok(())
     }
@@ -315,7 +310,7 @@ impl RequestHandler for AppHandle {
         }
 
         for track in &tracks {
-            debug!("Loaded track {}", track.file_path.display());
+            debug!("Loaded track {:?}", track.track_id);
         }
 
         (self

@@ -2,8 +2,6 @@ use std::{fmt::Display, time::Duration};
 
 use serde::{Deserialize, Serialize};
 
-use super::TrackId;
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Version {
     pub(crate) major: usize,
@@ -21,11 +19,7 @@ impl Display for Version {
             commit,
         } = self;
 
-        if *patch == 0 {
-            write!(f, "{major}.{minor:0>2} ({commit})")
-        } else {
-            write!(f, "{major}.{minor:0>2}.{patch} ({commit})")
-        }
+        write!(f, "{major}.{minor:0>2}.{patch} ({commit})")
     }
 }
 
@@ -77,12 +71,4 @@ impl From<SeekOffset> for SeekPosition {
             SeekOffset::Backward(d) => Self::Backward(d),
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum InsertPosition {
-    After(TrackId),
-    Next,
-    Start,
-    End,
 }

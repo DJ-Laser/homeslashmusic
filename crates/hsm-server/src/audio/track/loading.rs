@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use hsm_ipc::TrackMetadata;
+use hsm_ipc::QueuedTrackMetadata;
 use symphonia::core::{
     codecs::CODEC_TYPE_NULL,
     formats::FormatOptions,
@@ -39,7 +39,7 @@ fn probe_track_sync(path: &Path) -> Result<ProbeResult, LoadTrackError> {
     Ok(probed)
 }
 
-fn add_tag_to_metadata(metadata: &mut TrackMetadata, tag: &Tag) {
+fn add_tag_to_metadata(metadata: &mut QueuedTrackMetadata, tag: &Tag) {
     match tag.std_key {
         Some(StandardTagKey::TrackTitle) => {
             if let Value::String(title) = &tag.value {
@@ -84,7 +84,7 @@ fn add_tag_to_metadata(metadata: &mut TrackMetadata, tag: &Tag) {
     }
 }
 
-fn update_metadata(metadata: &mut TrackMetadata, metadata_log: &mut Metadata) {
+fn update_metadata(metadata: &mut QueuedTrackMetadata, metadata_log: &mut Metadata) {
     loop {
         let Some(revision) = metadata_log.current() else {
             return;
@@ -103,7 +103,7 @@ fn update_metadata(metadata: &mut TrackMetadata, metadata_log: &mut Metadata) {
 }
 
 /// Load a `Track` from a specified file path
-pub async fn load_file(path: PathBuf) -> Result<TrackMetadata, LoadTrackError> {
+pub async fn load_file(path: PathBuf) -> Result<QueuedTrackMetadata, LoadTrackError> {
     let track_metadata = smol::unblock(move || {
         let mut probed = probe_track_sync(&path)?;
 
@@ -121,7 +121,7 @@ pub async fn load_file(path: PathBuf) -> Result<TrackMetadata, LoadTrackError> {
             .zip(codec_params.n_frames)
             .map(|(base, spans)| base.calc_time(spans).into());
 
-        let mut track_metadata = TrackMetadata::new_empty(path);
+        let mut track_metadata = QueuedTrackMetadata::new_empty(path);
         track_metadata.total_duration = total_duration;
 
         if let Some(mut metadata) = probed.metadata.get() {

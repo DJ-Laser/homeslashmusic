@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 paste.workspace = true
 rustix.workspace = true
+thiserror.workspace = true
 git-version.workspace = true
 
 serde.workspace = true

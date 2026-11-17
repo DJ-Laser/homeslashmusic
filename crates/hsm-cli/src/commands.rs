@@ -2,7 +2,7 @@ use std::path::{self, PathBuf};
 
 use crate::cli::{Cli, Command, QueueCommand};
 use crate::ipc::send_request;
-use hsm_ipc::{InsertPosition, LoopMode, SeekOffset, TrackInstance, requests};
+use hsm_ipc::{InsertPosition, LoopMode, QueuedTrack, SeekOffset, requests};
 
 fn try_load_tracks(
     position: InsertPosition,
@@ -29,9 +29,9 @@ fn try_load_tracks(
 
 fn handle_queue_command(command: QueueCommand) -> Result<(), crate::Error> {
     match command {
-        QueueCommand::Clear => send_request(requests::ClearTracks)?,
+        QueueCommand::Clear => send_request(requests::ClearQueue)?,
         QueueCommand::Replace { tracks } => {
-            send_request(requests::ClearTracks)?;
+            send_request(requests::ClearQueue)?;
             try_load_tracks(InsertPosition::Start, &tracks.paths, false)?;
         }
         QueueCommand::Add { tracks } => try_load_tracks(InsertPosition::End, &tracks.paths, false)?,
@@ -43,8 +43,8 @@ fn handle_queue_command(command: QueueCommand) -> Result<(), crate::Error> {
     Ok(())
 }
 
-fn print_queue(tracks: Vec<TrackInstance>) {
-    for TrackInstance { metadata, .. } in tracks {
+fn print_queue(tracks: Vec<QueuedTrack>) {
+    for QueuedTrack { metadata, .. } in tracks {
         let title = metadata
             .title
             .unwrap_or_else(|| metadata.file_path.to_string_lossy().into_owned());
@@ -57,7 +57,7 @@ pub fn handle_command(command: Cli) -> Result<(), crate::Error> {
     match command.command {
         Command::Play { tracks } => {
             if let Some(tracks) = tracks {
-                send_request(requests::ClearTracks)?;
+                send_request(requests::ClearQueue)?;
                 try_load_tracks(InsertPosition::Start, &tracks.paths, false)?;
             }
 
@@ -74,7 +74,7 @@ pub fn handle_command(command: Cli) -> Result<(), crate::Error> {
             if let Some(loop_mode) = loop_mode {
                 send_request(requests::SetLoopMode(loop_mode.into()))?;
             } else {
-                let loop_mode = send_request(requests::QueryLoopMode)?;
+                let loop_mode = send_request(requests::GetLoopMode)?;
                 match loop_mode {
                     LoopMode::None => println!("Loop: none"),
                     LoopMode::Track => println!("Loop: track"),
@@ -86,7 +86,7 @@ pub fn handle_command(command: Cli) -> Result<(), crate::Error> {
             if let Some(shuffle) = shuffle {
                 send_request(requests::SetShuffle(shuffle.into()))?;
             } else {
-                let shuffle = send_request(requests::QueryShuffle)?;
+                let shuffle = send_request(requests::GetShuffle)?;
                 if shuffle {
                     println!("Shuffle: on");
                 } else {
@@ -98,7 +98,7 @@ pub fn handle_command(command: Cli) -> Result<(), crate::Error> {
             if let Some(volume) = volume {
                 send_request(requests::SetVolume(volume))?;
             } else {
-                let volume = send_request(requests::QueryVolume)?;
+                let volume = send_request(requests::GetVolume)?;
                 println!("Volume: {volume}");
             }
         }
@@ -106,7 +106,7 @@ pub fn handle_command(command: Cli) -> Result<(), crate::Error> {
         Command::Seek { seek_position } => match SeekOffset::try_from(seek_position) {
             Ok(seek_offset) => send_request(requests::SeekCurrent(seek_offset))?,
             Err(position) => {
-                if let Some(track_id) = send_request(requests::QueryCurrentTrackId)? {
+                if let Some(track_id) = send_request(requests::GetCurrentQueuedTrackId)? {
                     send_request(requests::SeekTo(track_id, position))?;
                 }
             }
@@ -118,7 +118,7 @@ pub fn handle_command(command: Cli) -> Result<(), crate::Error> {
             } else if let Some(tracks) = tracks {
                 handle_queue_command(QueueCommand::Add { tracks })?;
             } else {
-                let track_queue = send_request(requests::QueryQueueTracks)?;
+                let track_queue = send_request(requests::GetQueuedTracks)?;
                 print_queue(track_queue);
             }
         }

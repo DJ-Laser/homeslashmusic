@@ -5,7 +5,7 @@ use std::{
     time::Duration,
 };
 
-use hsm_ipc::{LoopMode, PlaybackState, TrackId, TrackInstance};
+use hsm_ipc::{LoopMode, PlaybackState, QueueItemId, QueuedTrack};
 use mpris_server::zbus::{ObjectPath, fdo};
 
 pub fn as_playback_status(playback_state: PlaybackState) -> mpris_server::PlaybackStatus {
@@ -42,7 +42,7 @@ pub fn from_dbus_time(time: mpris_server::Time) -> Duration {
 
 const TRACK_ID_PREFIX: &str = "/dev/djlaser/HomeSlashMusic/queue/";
 
-pub fn into_dbus_track_id(track_id: TrackId) -> mpris_server::TrackId {
+pub fn into_dbus_track_id(track_id: QueueItemId) -> mpris_server::TrackId {
     let path = ObjectPath::try_from(format!("{TRACK_ID_PREFIX}{track_id}"))
         .expect("TRACK_ID_PREFIX should always make valid object paths");
 
@@ -52,7 +52,7 @@ pub fn into_dbus_track_id(track_id: TrackId) -> mpris_server::TrackId {
 /// Returns Err is the `track_id` is invalid
 /// returns Ok(None) if the track id was `mpris_server::TrackId::NO_TRACK`
 /// returns Ok(Some(...)) if the track id was a valid format, though it may not actually exist
-pub fn from_dbus_track_id(track_id: &mpris_server::TrackId) -> fdo::Result<Option<TrackId>> {
+pub fn from_dbus_track_id(track_id: &mpris_server::TrackId) -> fdo::Result<Option<QueueItemId>> {
     if *track_id == mpris_server::TrackId::NO_TRACK {
         return Ok(None);
     }
@@ -67,7 +67,7 @@ pub fn from_dbus_track_id(track_id: &mpris_server::TrackId) -> fdo::Result<Optio
 }
 
 /// Same as `from_dbus_track_id` except `mpris_server::TrackId::NO_TRACK` returns an invalid error instead of Ok(None)
-pub fn from_real_dbus_track_id(track_id: &mpris_server::TrackId) -> fdo::Result<TrackId> {
+pub fn from_real_dbus_track_id(track_id: &mpris_server::TrackId) -> fdo::Result<QueueItemId> {
     if let Some(track_id) = from_dbus_track_id(track_id)? {
         Ok(track_id)
     } else {
@@ -77,12 +77,12 @@ pub fn from_real_dbus_track_id(track_id: &mpris_server::TrackId) -> fdo::Result<
     }
 }
 
-pub fn generate_empty_metadata(track_id: TrackId) -> mpris_server::Metadata {
+pub fn generate_empty_metadata(track_id: QueueItemId) -> mpris_server::Metadata {
     let track_id = into_dbus_track_id(track_id);
     mpris_server::Metadata::builder().trackid(track_id).build()
 }
 
-pub fn generate_metadata(track: TrackInstance) -> mpris_server::Metadata {
+pub fn generate_metadata(track: QueuedTrack) -> mpris_server::Metadata {
     let track_id = into_dbus_track_id(track.id);
     let track = track.metadata;
 
