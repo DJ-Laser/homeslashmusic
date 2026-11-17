@@ -7,20 +7,20 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TrackLocation {
-    Local(PathBuf),
+    LocalFile(PathBuf),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TrackGroupLocation {
-    Local { title: String, artist: String },
+    LocalTags { title: String, artist: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ArtistLocation {
-    Local { name: String },
+    LocalTags { name: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PlaylistLocation {
-    Local(PathBuf),
+    LocalFile(PathBuf),
 }

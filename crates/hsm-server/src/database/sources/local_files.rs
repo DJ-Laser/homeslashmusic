@@ -75,7 +75,7 @@ fn get_artists(ctx: &JobContext, tag: &Tag, album: bool) -> Vec<ArtistId> {
                 return;
             };
 
-            let location = name.map(|name| ArtistLocation::Local { name: name.into() });
+            let location = name.map(|name| ArtistLocation::LocalTags { name: name.into() });
             let id = if let Some(location) = location {
                 db.add_location_to_artist_by_mbid(mbid, location)
                     .map_err(Some)
@@ -230,7 +230,7 @@ fn get_track_group(ctx: &JobContext, tag: &Tag) -> Option<TrackGroupId> {
         .or(tag.get_string(ItemKey::TrackArtist))
         .map(Into::into)?;
 
-    let location = TrackGroupLocation::Local {
+    let location = TrackGroupLocation::LocalTags {
         title: title.clone(),
         artist: location_artist,
     };
@@ -263,7 +263,7 @@ fn get_track_group(ctx: &JobContext, tag: &Tag) -> Option<TrackGroupId> {
 }
 
 async fn load_song_file(ctx: JobContext, path: PathBuf) -> Result<TrackId, LoadFileError> {
-    let location = TrackLocation::Local(path.clone());
+    let location = TrackLocation::LocalFile(path.clone());
 
     let (length, Some(ref tag)) = parse_file_tags(path).await? else {
         return Err(LoadFileError::MissingTags);

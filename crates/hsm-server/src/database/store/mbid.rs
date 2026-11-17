@@ -10,28 +10,7 @@ use crate::database::{
     store::DatabaseStore,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct MusicBrainzId(uuid::Uuid);
-
-impl MusicBrainzId {
-    pub fn parse_str(uuid_str: &str) -> Result<Self, uuid::Error> {
-        Ok(Self(uuid::Uuid::try_parse(uuid_str)?))
-    }
-}
-
-impl Display for MusicBrainzId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-impl TryFrom<&str> for MusicBrainzId {
-    type Error = uuid::Error;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        Self::parse_str(value)
-    }
-}
+pub use hsm_ipc::MusicBrainzId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MbidQueryType {

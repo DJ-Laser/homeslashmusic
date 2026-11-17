@@ -28,7 +28,7 @@ impl DerivedArtistData {
         &self.tracks
     }
 
-    /// Track Groups by this artist, unsorted
+    /// Track groups by this artist, unsorted
     pub fn track_groups(&self) -> &Vec<TrackGroupId> {
         &self.track_groups
     }

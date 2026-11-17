@@ -4,6 +4,7 @@ use crate::{LoopMode, PlaybackState};
 
 /// An event than can be sent from the serverasynchronously at any time.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum Event {
     PlaybackStateChanged(PlaybackState),
     LoopModeChanged(LoopMode),
