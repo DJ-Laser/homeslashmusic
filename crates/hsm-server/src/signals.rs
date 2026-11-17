@@ -1,6 +1,7 @@
 use std::io;
 
 use async_signal::{Signal, Signals};
+use log::info;
 use smol::stream::StreamExt;
 use thiserror::Error;
 
@@ -27,6 +28,8 @@ impl SignalHandler {
             let Ok(signal) = signal else {
                 return;
             };
+
+            info!("Caught terminal signal, shutting down.");
 
             if matches!(signal, Signal::Term | Signal::Quit | Signal::Int) {
                 return;

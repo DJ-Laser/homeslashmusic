@@ -68,12 +68,12 @@ pub async fn run_mpris_server(handle: AppHandle) -> Result<(), MprisServerError>
     let server =
         Server::new_with_track_list(BUS_NAME_SUFFIX, MprisImpl::new(handle, quit_tx)).await?;
 
-    let mut exit = false;
+    let mut quit = false;
     loop {
         (
             async {
                 let _ = quit_rx.recv().await;
-                exit = true;
+                quit = true;
             },
             async {
                 if let Ok(event) = event_rx.recv().await {
@@ -84,7 +84,7 @@ pub async fn run_mpris_server(handle: AppHandle) -> Result<(), MprisServerError>
             .race()
             .await;
 
-        if !exit {
+        if quit {
             break;
         }
     }

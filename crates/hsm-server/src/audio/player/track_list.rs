@@ -1,14 +1,13 @@
 use std::{
     ops::Index,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
 };
 
 use hsm_ipc::{InsertPosition, TrackId, TrackInstance, TrackMetadata};
 use rand::{Rng, seq::SliceRandom};
-use smol::lock::Mutex;
 
 use super::PlayerError;
 
@@ -154,30 +153,24 @@ impl TrackList {
         self.len.load(Ordering::Acquire)
     }
 
-    pub async fn get_track_index(&self, track_id: TrackId) -> Option<usize> {
-        let inner = self.inner.lock().await;
-        for index in 0..inner.len() {
-            if inner[index].id == track_id {
-                return Some(index);
-            }
-        }
-
-        None
+    pub fn get_track_index(&self, track_id: TrackId) -> Option<usize> {
+        let inner = self.inner.lock().unwrap();
+        (0..inner.len()).find(|&index| inner[index].id == track_id)
     }
 
-    pub async fn get_track_at(&self, index: usize) -> Option<ArcTrackInstance> {
+    pub fn get_track_at(&self, index: usize) -> Option<ArcTrackInstance> {
         let num_tracks = self.len.load(Ordering::Acquire);
 
         if index >= num_tracks {
             return None;
         }
 
-        let inner = self.inner.lock().await;
+        let inner = self.inner.lock().unwrap();
         Some(inner[index].clone())
     }
 
     /// Returns `None` if the track list length is zero
-    pub async fn get_tracks_to_queue(
+    pub fn get_tracks_to_queue(
         &self,
         index: usize,
     ) -> Option<(ArcTrackInstance, Option<ArcTrackInstance>)> {
@@ -187,7 +180,7 @@ impl TrackList {
             return None;
         }
 
-        let inner = self.inner.lock().await;
+        let inner = self.inner.lock().unwrap();
 
         let current_track = inner[index].clone();
 
@@ -206,18 +199,12 @@ impl TrackList {
     }
 
     /// Returns the new position of `current_index` after the shuffle/order
-    pub async fn set_shuffle(
-        &self,
-        shuffle: bool,
-        current_index: usize,
-    ) -> Result<usize, PlayerError> {
-        let mut inner = self.inner.lock().await;
+    pub fn set_shuffle(&self, shuffle: bool, current_index: usize) -> usize {
+        let mut inner = self.inner.lock().unwrap();
         self.shuffle_enabled.store(shuffle, Ordering::Release);
 
         if shuffle {
-            let new_index = inner.shuffle_tracks(current_index, &mut rand::rng());
-
-            Ok(new_index)
+            inner.shuffle_tracks(current_index, &mut rand::rng())
         } else {
             // After `order_tracks` is run `shuffled_track_indicies` maps exactly to `track_list`
             let track_index = if inner.len() != 0 {
@@ -227,27 +214,25 @@ impl TrackList {
             };
 
             inner.order_tracks();
-            Ok(track_index)
+            track_index
         }
     }
 
-    pub async fn clear(&self) -> Result<(), PlayerError> {
-        let mut inner = self.inner.lock().await;
+    pub fn clear(&self) {
+        let mut inner = self.inner.lock().unwrap();
         inner.clear();
         self.len.store(0, Ordering::Release);
-
-        Ok(())
     }
 
     /// Returns the new position of `current_index`
-    pub async fn insert_tracks(
+    pub fn insert_tracks(
         &self,
         current_index: usize,
         position: InsertPosition,
         tracks: &[Arc<TrackMetadata>],
         set_as_current: bool,
     ) -> Result<usize, PlayerError> {
-        let mut inner = self.inner.lock().await;
+        let mut inner = self.inner.lock().unwrap();
 
         let track_list_started_empty = inner.len() == 0;
 
@@ -313,8 +298,8 @@ impl TrackList {
         }
     }
 
-    pub async fn get_tracks(&self) -> Vec<ArcTrackInstance> {
-        let inner = self.inner.lock().await;
+    pub fn get_tracks(&self) -> Vec<ArcTrackInstance> {
+        let inner = self.inner.lock().unwrap();
 
         inner.track_list.clone()
     }

@@ -8,7 +8,7 @@ use rodio::{
     ChannelCount, Decoder, Sample, SampleRate, Source, source::SeekError as RodioSeekError,
 };
 
-use crate::audio_server::track::LoadTrackError;
+use crate::audio::track::LoadTrackError;
 
 /// A `Source` that decodes `Track`s using symphonia
 pub(crate) struct TrackDecoder {

@@ -4,7 +4,6 @@ mod output;
 mod track_list;
 
 use std::{
-    mem,
     sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
@@ -15,16 +14,17 @@ use std::{
 use decoder::TrackDecoder;
 use float_cmp::approx_eq;
 use hsm_ipc::{
-    Event, InsertPosition, LoopMode, PlaybackState, SeekPosition, TrackId, TrackMetadata,
+    Event, InsertPosition, LoopMode, PlaybackState, SeekOffset, SeekPosition, TrackId,
+    TrackMetadata,
 };
 use log::{debug, error};
-use rodio::{Source, mixer::Mixer};
+use rodio::mixer::Mixer;
 
 use smol::channel;
 use thiserror::Error;
 use track_list::{ArcTrackInstance, TrackList};
 
-use crate::audio_server::{
+use crate::audio::{
     player::{
         controlled_source::{Controls, SeekError, SourceEvent, wrap_source},
         output::{PlayerAudioOutput, SourceQueue, SourceQueueState},
@@ -69,16 +69,26 @@ pub struct Player {
     event_tx: async_broadcast::Sender<Event>,
     source_tx: channel::Sender<SourceEvent>,
     source_rx: channel::Receiver<SourceEvent>,
+
+    #[expect(unused, reason = "Channel closes when dropped, waking output thread")]
+    guard_tx: channel::Sender<()>,
 }
 
 impl Player {
-    pub fn connect_new(event_tx: async_broadcast::Sender<Event>, mixer: &Mixer) -> Self {
-        let (player, source) = Self::new(event_tx);
+    pub fn connect_new(
+        event_tx: async_broadcast::Sender<Event>,
+        mixer: &Mixer,
+        guard_tx: channel::Sender<()>,
+    ) -> Self {
+        let (player, source) = Self::new(event_tx, guard_tx);
         mixer.add(source);
         player
     }
 
-    pub fn new(event_tx: async_broadcast::Sender<Event>) -> (Self, PlayerAudioOutput) {
+    pub fn new(
+        event_tx: async_broadcast::Sender<Event>,
+        guard_tx: channel::Sender<()>,
+    ) -> (Self, PlayerAudioOutput) {
         let (source_tx, source_rx) = channel::unbounded();
 
         let player = Self {
@@ -91,6 +101,7 @@ impl Player {
             event_tx,
             source_tx,
             source_rx,
+            guard_tx,
         };
 
         let audio_source = PlayerAudioOutput::new(player.source_queue.clone());
@@ -98,56 +109,49 @@ impl Player {
         (player, audio_source)
     }
 
-    fn emit(&self, event: Event) -> Result<(), PlayerError> {
-        self.event_tx
-            .try_broadcast(event)
-            .map(|_| ())
-            .map_err(|_| PlayerError::EventChannelClosed)
+    fn emit(&self, event: Event) {
+        if self.event_tx.try_broadcast(event).is_err() {
+            error!("Player event channel closed");
+        }
     }
 
-    async fn load_track_source(
-        &self,
-        track: &Arc<TrackMetadata>,
-    ) -> Result<Box<dyn Source + Send + 'static>, LoadTrackError> {
-        let decoder = TrackDecoder::new(track.file_path.clone()).await?;
-
-        Ok(Box::new(wrap_source(
-            decoder,
-            self.controls.clone(),
-            self.source_tx.clone(),
-        )))
-    }
-
-    async fn clear_source_queue(&self) {
-        let mut source_queue = self.source_queue.lock().await;
+    fn clear_source_queue(&self) {
+        let mut source_queue = self.source_queue.lock();
 
         if source_queue.is_playing() {
             source_queue.invalidate();
-            self.controls.skip_one().await;
+            self.controls.skip_one();
         }
     }
 
     /// If `wait_for_empty_queue` is true, this function will loop until the queue become open for replacement
     /// If it is not ensured that the queue is empty beforehand it can cause an infinite loop and lockup
-    async fn queue_track(
-        &self,
-        track: &Arc<TrackMetadata>,
-        wait_for_empty_queue: bool,
-    ) -> Result<(), LoadTrackError> {
-        let source = self.load_track_source(track).await?;
-        let mut source_queue = self.source_queue.lock().await;
+    async fn queue_track(&self, track: &Arc<TrackMetadata>, wait_for_empty_queue: bool) {
+        let decoder = match TrackDecoder::new(track.file_path.clone()).await {
+            Ok(source) => source,
+            Err(error) => {
+                error!("Failed to load track: {error}");
+                return;
+            }
+        };
 
-        while !wait_for_empty_queue && source_queue.is_queued() {
-            // Unlock the queue mutex
-            mem::drop(source_queue);
+        loop {
+            {
+                let mut source_queue = self.source_queue.lock();
+                if wait_for_empty_queue || !source_queue.is_queued() {
+                    let source = Box::new(wrap_source(
+                        decoder,
+                        self.controls.clone(),
+                        self.source_tx.clone(),
+                    ));
+
+                    *source_queue = SourceQueueState::Queued(source);
+                    break;
+                }
+            }
 
             smol::Timer::after(controlled_source::SOURCE_UPDATE_INTERVAL * 3).await;
-            source_queue = self.source_queue.lock().await;
         }
-
-        *source_queue = SourceQueueState::Queued(source);
-
-        Ok(())
     }
 
     /// Returns true if there was a current track to queue
@@ -155,21 +159,20 @@ impl Player {
     /// If `use_queued` is true this function will use the source waiting in queue instead of reloading the current track
     /// Because this function queues the next track, `use_queued` should only be true if the `current_track_index` is exactly one more
     /// than the last call to `queue_current_track`
-    async fn queue_current_track(&self, use_queued: bool) -> Result<bool, LoadTrackError> {
+    async fn queue_current_track(&self, use_queued: bool) -> bool {
         let Some((current_track, next_track)) = self
             .tracks
             .get_tracks_to_queue(self.current_track_index.load(Ordering::Acquire))
-            .await
         else {
-            return Ok(false);
+            return false;
         };
 
         let load_necessary = {
-            let mut source_queue = self.source_queue.lock().await;
+            let mut source_queue = self.source_queue.lock();
             match *source_queue {
                 // Skip the current track so the queued one plays
                 SourceQueueState::Queued(_) => {
-                    self.controls.skip_one().await;
+                    self.controls.skip_one();
                     if !use_queued {
                         source_queue.invalidate();
                     }
@@ -181,7 +184,7 @@ impl Player {
                 // If `use_queued` is false skip and load a new track
                 SourceQueueState::Playing => {
                     if !use_queued {
-                        self.controls.skip_one().await;
+                        self.controls.skip_one();
                     }
 
                     !use_queued
@@ -193,117 +196,106 @@ impl Player {
         };
 
         if load_necessary {
-            self.queue_track(&current_track.metadata, true).await?;
+            self.queue_track(&current_track.metadata, true).await;
         }
 
         if let Some(next_track) = next_track {
-            self.queue_track(&next_track.metadata, false).await?;
+            self.queue_track(&next_track.metadata, false).await;
         }
 
-        Ok(true)
+        true
     }
 
-    pub async fn playback_state(&self) -> PlaybackState {
-        self.controls.playback_state().await
+    pub fn playback_state(&self) -> PlaybackState {
+        self.controls.playback_state()
     }
 
-    async fn is_stopped(&self) -> bool {
-        matches!(self.playback_state().await, PlaybackState::Stopped)
+    fn is_stopped(&self) -> bool {
+        matches!(self.playback_state(), PlaybackState::Stopped)
     }
 
-    async fn set_playback_state(
-        &self,
-        new_state: PlaybackState,
-    ) -> Result<PlaybackState, PlayerError> {
-        let prev_state = self.controls.set_playback_state(new_state).await;
+    fn set_playback_state(&self, new_state: PlaybackState) -> PlaybackState {
+        let prev_state = self.controls.set_playback_state(new_state);
 
         if prev_state != new_state {
-            self.emit(Event::PlaybackStateChanged(new_state))?;
+            self.emit(Event::PlaybackStateChanged(new_state));
             debug!("Setting playback state to {new_state:?}");
         }
 
-        Ok(prev_state)
+        prev_state
     }
 
-    pub async fn play(&self) -> Result<(), PlayerError> {
-        if self.is_stopped().await {
-            let had_tracks = self.queue_current_track(true).await?;
-            if !had_tracks {
-                return Ok(());
+    pub async fn play(&self) {
+        if self.is_stopped() {
+            let had_tracks = self.queue_current_track(true);
+            if !had_tracks.await {
+                return;
             }
         }
 
-        self.set_playback_state(PlaybackState::Playing).await?;
-
-        Ok(())
+        self.set_playback_state(PlaybackState::Playing);
     }
 
-    pub async fn pause(&self) -> Result<(), PlayerError> {
-        let prev_state = self.controls.playback_state().await;
+    pub fn pause(&self) {
+        let prev_state = self.controls.playback_state();
 
         // Don't un-stop playback on pause
         if matches!(prev_state, PlaybackState::Playing) {
-            self.set_playback_state(PlaybackState::Paused).await?;
+            self.set_playback_state(PlaybackState::Paused);
         }
-
-        Ok(())
     }
 
-    pub async fn toggle_playback(&self) -> Result<(), PlayerError> {
-        let current_state = self.controls.playback_state().await;
+    pub async fn toggle_playback(&self) {
+        let current_state = self.controls.playback_state();
         match current_state {
-            PlaybackState::Paused | PlaybackState::Stopped => self.play().await?,
-            PlaybackState::Playing => self.pause().await?,
+            PlaybackState::Paused | PlaybackState::Stopped => self.play().await,
+            PlaybackState::Playing => self.pause(),
         }
-
-        Ok(())
     }
 
-    pub async fn stop(&self) -> Result<(), PlayerError> {
-        self.clear_source_queue().await;
-        self.set_playback_state(PlaybackState::Stopped).await?;
-        self.controls.reset_position().await;
-        Ok(())
+    pub fn stop(&self) {
+        self.clear_source_queue();
+        self.set_playback_state(PlaybackState::Stopped);
+        self.controls.reset_position();
     }
 
-    pub async fn current_track(&self) -> Option<ArcTrackInstance> {
+    pub fn current_track(&self) -> Option<ArcTrackInstance> {
         self.tracks
             .get_track_at(self.current_track_index.load(Ordering::Acquire))
-            .await
     }
 
-    pub async fn go_to_track(&self, track_id: TrackId) -> Result<bool, PlayerError> {
-        let Some(track_index) = self.tracks.get_track_index(track_id).await else {
-            return Ok(false);
+    pub async fn go_to_track(&self, track_id: TrackId) -> bool {
+        let Some(track_index) = self.tracks.get_track_index(track_id) else {
+            return false;
         };
 
         self.current_track_index
             .store(track_index, Ordering::Release);
 
-        if !self.is_stopped().await {
-            self.queue_current_track(false).await?;
+        if !self.is_stopped() {
+            self.queue_current_track(false).await;
         }
 
-        Ok(true)
+        true
     }
 
-    pub async fn go_to_index(&self, index: usize) -> Result<bool, PlayerError> {
+    pub async fn go_to_index(&self, index: usize) -> bool {
         if index >= self.tracks.len() {
-            return Ok(false);
+            return false;
         }
 
-        if !self.is_stopped().await {
-            self.queue_current_track(true).await?;
+        if !self.is_stopped() {
+            self.queue_current_track(true).await;
         }
 
-        Ok(true)
+        true
     }
 
-    async fn stop_or_wrap_track(&self, reverse: bool) -> Result<(), PlayerError> {
+    async fn stop_or_wrap_track(&self, reverse: bool) {
         let printed_position = if reverse { "beginning" } else { "end" };
         let printed_loop_position = if reverse { "end" } else { "beginning" };
 
-        let should_loop = !matches!(self.controls.loop_mode().await, LoopMode::None);
+        let should_loop = !matches!(self.controls.loop_mode(), LoopMode::None);
 
         // Don't skip to end if loop is off
         let new_index = if should_loop && reverse {
@@ -317,30 +309,28 @@ impl Player {
         if should_loop {
             debug!("Track list reached {printed_position}, looping to {printed_loop_position}");
 
-            if !self.is_stopped().await {
-                self.queue_current_track(false).await?;
+            if !self.is_stopped() {
+                self.queue_current_track(false).await;
             }
         } else {
             debug!("Track list reached {printed_position}, stopping");
-            self.stop().await?;
+            self.stop();
         }
-
-        Ok(())
     }
 
     pub async fn go_to_next_track(&self) -> Result<(), PlayerError> {
         let new_index = 1 + self.current_track_index.fetch_add(1, Ordering::Release);
 
-        if self.is_stopped().await {
+        if self.is_stopped() {
             if new_index >= self.tracks.len() {
-                self.stop_or_wrap_track(false).await?;
+                self.stop_or_wrap_track(false).await;
             }
 
             return Ok(());
         }
 
-        if !self.queue_current_track(true).await? {
-            self.stop_or_wrap_track(false).await?;
+        if !self.queue_current_track(true).await {
+            self.stop_or_wrap_track(false).await;
         }
 
         Ok(())
@@ -349,19 +339,19 @@ impl Player {
     pub async fn go_to_previous_track(&self, soft: bool) -> Result<(), PlayerError> {
         const RESTART_THRESHOLD: Duration = Duration::from_secs(5);
 
-        if soft && self.position().await > RESTART_THRESHOLD {
+        if soft && self.position() > RESTART_THRESHOLD {
             self.seek(SeekPosition::To(Duration::ZERO)).await
         } else {
             let current_index = self.current_track_index.load(Ordering::Acquire);
 
             if current_index == 0 {
-                self.stop_or_wrap_track(true).await?;
+                self.stop_or_wrap_track(true).await;
             } else {
                 self.current_track_index
                     .store(current_index - 1, Ordering::Release);
 
-                if !self.is_stopped().await {
-                    self.queue_current_track(false).await?;
+                if !self.is_stopped() {
+                    self.queue_current_track(false).await;
                 }
             }
 
@@ -369,93 +359,107 @@ impl Player {
         }
     }
 
-    pub async fn shuffle(&self) -> bool {
+    pub fn shuffle(&self) -> bool {
         self.tracks.shuffle_enabled()
     }
 
-    pub async fn set_shuffle(&self, shuffle: bool) -> Result<(), PlayerError> {
-        let prev_shuffle = self.shuffle().await;
+    pub async fn set_shuffle(&self, shuffle: bool) {
+        let prev_shuffle = self.shuffle();
         if shuffle != prev_shuffle {
             let current_index = self.current_track_index.load(Ordering::Acquire);
-            let new_index = self.tracks.set_shuffle(shuffle, current_index).await?;
+            let new_index = self.tracks.set_shuffle(shuffle, current_index);
 
             self.current_track_index.store(new_index, Ordering::Release);
 
-            self.emit(Event::ShuffleChanged(shuffle))?;
+            self.emit(Event::ShuffleChanged(shuffle));
             debug!("Shuffle set to {shuffle}");
 
-            if !self.is_stopped().await {
+            if !self.is_stopped() {
                 let current_track_index = self.current_track_index.load(Ordering::Acquire);
                 if let Some((_, Some(next_track))) =
-                    self.tracks.get_tracks_to_queue(current_track_index).await
+                    self.tracks.get_tracks_to_queue(current_track_index)
                 {
-                    self.queue_track(&next_track.metadata, true).await?;
+                    self.queue_track(&next_track.metadata, true).await;
                 }
             }
         }
-
-        Ok(())
     }
 
-    pub async fn loop_mode(&self) -> LoopMode {
-        self.controls.loop_mode().await
+    pub fn loop_mode(&self) -> LoopMode {
+        self.controls.loop_mode()
     }
 
-    pub async fn set_loop_mode(&self, loop_mode: LoopMode) -> Result<(), PlayerError> {
-        let prev_mode = self.controls.set_loop_mode(loop_mode).await;
+    pub fn set_loop_mode(&self, loop_mode: LoopMode) {
+        let prev_mode = self.controls.set_loop_mode(loop_mode);
 
         if loop_mode != prev_mode {
-            self.emit(Event::LoopModeChanged(loop_mode))?;
+            self.emit(Event::LoopModeChanged(loop_mode));
             debug!("Loop mode set to {loop_mode:?}");
         }
-
-        Ok(())
     }
 
-    pub async fn volume(&self) -> f32 {
-        self.controls.volume().await
+    pub fn volume(&self) -> f32 {
+        self.controls.volume()
     }
 
-    pub async fn set_volume(&self, volume: f32) -> Result<(), PlayerError> {
+    pub fn set_volume(&self, volume: f32) {
         let clamped_volume = volume.clamp(0.0, 1.0);
-        let prev_volume = self.controls.set_volume(clamped_volume).await;
+        let prev_volume = self.controls.set_volume(clamped_volume);
 
         if approx_eq!(f32, clamped_volume, prev_volume) {
-            self.emit(Event::VolumeChanged(clamped_volume))?;
+            self.emit(Event::VolumeChanged(clamped_volume));
             debug!("volume set to {volume:?}");
         }
-
-        Ok(())
     }
 
-    pub async fn position(&self) -> Duration {
-        self.controls.position().await
+    pub fn position(&self) -> Duration {
+        self.controls.position()
     }
 
     pub async fn seek(&self, seek_position: SeekPosition) -> Result<(), PlayerError> {
-        if matches!(*self.source_queue.lock().await, SourceQueueState::None) {
+        if matches!(*self.source_queue.lock(), SourceQueueState::None) {
             return Ok(());
         }
 
-        let rx = self.controls.seek(seek_position).await;
+        self.controls
+            .seek(seek_position)
+            .await
+            .map_err(|_| SeekError::ErrorChannelClosed)??;
 
-        rx.await.map_err(|_| SeekError::ErrorChannelClosed)??;
         debug!("Seeked {seek_position:?}");
 
         Ok(())
     }
 
-    pub async fn get_tracks(&self) -> Vec<ArcTrackInstance> {
-        self.tracks.get_tracks().await
+    pub async fn seek_current(&self, seek_offset: SeekOffset) -> Result<(), PlayerError> {
+        self.seek(seek_offset.into()).await
     }
 
-    pub async fn clear_tracks(&self) -> Result<(), PlayerError> {
-        self.stop().await?;
-        self.tracks.clear().await?;
+    pub async fn seek_to(
+        &self,
+        track_id: TrackId,
+        position: Duration,
+    ) -> Result<bool, PlayerError> {
+        if let Some(track) = self.current_track()
+            && track.id == track_id
+        {
+            self.seek(SeekPosition::To(position)).await?;
+
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    pub fn get_tracks(&self) -> Vec<ArcTrackInstance> {
+        self.tracks.get_tracks()
+    }
+
+    pub fn clear_tracks(&self) {
+        self.stop();
+        self.tracks.clear();
         self.current_track_index.store(0, Ordering::Release);
         debug!("Clearing track list");
-
-        Ok(())
     }
 
     /// Inserts new tracks at a specified position in the track list
@@ -467,17 +471,16 @@ impl Player {
     ) -> Result<(), PlayerError> {
         let current_index = self.current_track_index.load(Ordering::Acquire);
 
-        let new_current_index = self
-            .tracks
-            .insert_tracks(current_index, position, tracks, set_as_current)
-            .await?;
+        let new_current_index =
+            self.tracks
+                .insert_tracks(current_index, position, tracks, set_as_current)?;
 
         self.current_track_index
             .store(new_current_index, Ordering::Release);
 
         // If the track list was replaced, a new song must begin playing
-        if set_as_current && !self.is_stopped().await {
-            self.queue_current_track(false).await?;
+        if set_as_current && !self.is_stopped() {
+            self.queue_current_track(false).await;
         }
 
         Ok(())
@@ -504,7 +507,7 @@ impl Player {
 
             match event {
                 SourceEvent::LoopError(error) => error!("Error looping source: {error}"),
-                SourceEvent::Seeked(position) => self.emit(Event::Seeked(position))?,
+                SourceEvent::Seeked(position) => self.emit(Event::Seeked(position)),
                 _ => (),
             }
         }

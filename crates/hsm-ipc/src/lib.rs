@@ -32,7 +32,11 @@ fn read_socket_path() -> String {
         format!("/run/user/{}", uid.as_raw())
     });
 
-    format!("{runtime_path}/homeslashmusic.sock")
+    if cfg!(debug_assertions) {
+        format!("{runtime_path}/homeslashmusic-debug.sock")
+    } else {
+        format!("{runtime_path}/homeslashmusic.sock")
+    }
 }
 
 pub fn socket_path() -> &'static str {

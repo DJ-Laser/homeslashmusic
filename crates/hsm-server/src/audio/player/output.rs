@@ -1,7 +1,11 @@
-use std::{fmt::Debug, mem, sync::Arc, time::Duration};
+use std::{
+    fmt::Debug,
+    mem,
+    sync::{Arc, Mutex, MutexGuard},
+    time::Duration,
+};
 
 use rodio::{Sample, Source, source};
-use smol::lock::{Mutex, MutexGuard};
 
 pub enum SourceQueueState {
     Queued(Box<dyn Source + Send>),
@@ -66,12 +70,8 @@ impl SourceQueue {
         Self(Mutex::new(SourceQueueState::None))
     }
 
-    pub async fn lock(&self) -> MutexGuard<'_, SourceQueueState> {
-        self.0.lock().await
-    }
-
-    fn lock_blocking(&self) -> MutexGuard<'_, SourceQueueState> {
-        self.0.lock_blocking()
+    pub fn lock(&self) -> MutexGuard<'_, SourceQueueState> {
+        self.0.lock().unwrap()
     }
 }
 
@@ -92,7 +92,7 @@ impl PlayerAudioOutput {
 
     fn load_next(&mut self) {
         self.current = {
-            let mut next = self.source_queue.lock_blocking();
+            let mut next = self.source_queue.lock();
 
             match next.consume() {
                 Some(next) => next,

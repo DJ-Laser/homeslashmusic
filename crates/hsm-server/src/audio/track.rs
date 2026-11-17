@@ -6,12 +6,13 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub use cache::TrackCache;
-pub use loading::load_file;
 use rodio::decoder::DecoderError;
 use smol::fs;
 use symphonia::core::errors::Error as SymphoniaError;
 use thiserror::Error;
+
+pub use cache::TrackCache;
+pub use loading::load_file;
 
 #[derive(Debug, Error)]
 pub enum LoadTrackError {

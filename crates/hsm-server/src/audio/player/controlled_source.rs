@@ -1,14 +1,14 @@
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{Arc, Mutex, MutexGuard},
+    time::Duration,
+};
 
 use hsm_ipc::SeekPosition;
 use rodio::{
     Source,
     source::{Amplify, Pausable, SeekError as RodioSeekError, TrackPosition},
 };
-use smol::{
-    channel::Sender,
-    lock::{Mutex, MutexGuard},
-};
+use smol::channel::Sender;
 use thiserror::Error;
 
 use super::{LoopMode, PlaybackState};
@@ -40,53 +40,49 @@ impl Controls {
         }))
     }
 
-    async fn lock(&self) -> MutexGuard<'_, ControlsInner> {
-        self.0.lock().await
+    fn lock(&self) -> MutexGuard<'_, ControlsInner> {
+        self.0.lock().unwrap()
     }
 
-    fn lock_blocking(&self) -> MutexGuard<'_, ControlsInner> {
-        self.0.lock_blocking()
+    pub fn playback_state(&self) -> PlaybackState {
+        self.lock().playback_state
     }
 
-    pub async fn playback_state(&self) -> PlaybackState {
-        self.lock().await.playback_state
+    pub fn set_playback_state(&self, playback_state: PlaybackState) -> PlaybackState {
+        std::mem::replace(&mut self.lock().playback_state, playback_state)
     }
 
-    pub async fn set_playback_state(&self, playback_state: PlaybackState) -> PlaybackState {
-        std::mem::replace(&mut self.lock().await.playback_state, playback_state)
+    pub fn loop_mode(&self) -> LoopMode {
+        self.lock().loop_mode
     }
 
-    pub async fn loop_mode(&self) -> LoopMode {
-        self.lock().await.loop_mode
+    pub fn set_loop_mode(&self, loop_mode: LoopMode) -> LoopMode {
+        std::mem::replace(&mut self.lock().loop_mode, loop_mode)
     }
 
-    pub async fn set_loop_mode(&self, loop_mode: LoopMode) -> LoopMode {
-        std::mem::replace(&mut self.lock().await.loop_mode, loop_mode)
+    pub fn skip_one(&self) {
+        self.lock().to_skip += 1;
     }
 
-    pub async fn skip_one(&self) {
-        self.lock().await.to_skip += 1;
+    pub fn volume(&self) -> f32 {
+        self.lock().volume
     }
 
-    pub async fn volume(&self) -> f32 {
-        self.lock().await.volume
+    pub fn set_volume(&self, volume: f32) -> f32 {
+        std::mem::replace(&mut self.lock().volume, volume)
     }
 
-    pub async fn set_volume(&self, volume: f32) -> f32 {
-        std::mem::replace(&mut self.lock().await.volume, volume)
+    pub fn position(&self) -> Duration {
+        self.lock().position
     }
 
-    pub async fn position(&self) -> Duration {
-        self.lock().await.position
+    pub fn reset_position(&self) {
+        self.lock().position = Duration::ZERO;
     }
 
-    pub async fn reset_position(&self) {
-        self.lock().await.position = Duration::ZERO;
-    }
-
-    pub async fn seek(&self, seek_position: SeekPosition) -> async_oneshot::Receiver<SeekResult> {
+    pub fn seek(&self, seek_position: SeekPosition) -> async_oneshot::Receiver<SeekResult> {
         let (tx, rx) = async_oneshot::oneshot();
-        self.lock().await.seek_position = Some((seek_position, tx));
+        self.lock().seek_position = Some((seek_position, tx));
         rx
     }
 }
@@ -136,7 +132,7 @@ where
     }
 
     fn update_control_state(&mut self) {
-        let mut controls = self.controls.lock_blocking();
+        let mut controls = self.controls.lock();
 
         self.cached_loop_mode = controls.loop_mode;
         if controls.to_skip > 0 {

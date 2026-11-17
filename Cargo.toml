@@ -16,6 +16,7 @@ hsm-ipc = { path = "./crates/hsm-ipc" }
 rand = "0.9.2"
 paste = "1.0.15"
 dashmap = "6.1.0"
+arc-swap = "1.9.5"
 float-cmp = "0.10.0"
 thiserror = "2.0.12"
 git-version = "0.3.9"
