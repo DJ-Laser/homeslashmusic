@@ -5,7 +5,7 @@ use std::{
     time::Duration,
 };
 
-use hsm_ipc::{LoopMode, PlaybackState, QueueItemId, QueuedTrack};
+use hsm_ipc::{LoopMode, PlaybackState, QueuedTrack, QueuedTrackId};
 use mpris_server::zbus::{ObjectPath, fdo};
 
 pub fn as_playback_status(playback_state: PlaybackState) -> mpris_server::PlaybackStatus {
@@ -42,7 +42,7 @@ pub fn from_dbus_time(time: mpris_server::Time) -> Duration {
 
 const TRACK_ID_PREFIX: &str = "/dev/djlaser/HomeSlashMusic/queue/";
 
-pub fn into_dbus_track_id(track_id: QueueItemId) -> mpris_server::TrackId {
+pub fn into_dbus_track_id(track_id: QueuedTrackId) -> mpris_server::TrackId {
     let path = ObjectPath::try_from(format!("{TRACK_ID_PREFIX}{track_id}"))
         .expect("TRACK_ID_PREFIX should always make valid object paths");
 
@@ -52,7 +52,7 @@ pub fn into_dbus_track_id(track_id: QueueItemId) -> mpris_server::TrackId {
 /// Returns Err is the `track_id` is invalid
 /// returns Ok(None) if the track id was `mpris_server::TrackId::NO_TRACK`
 /// returns Ok(Some(...)) if the track id was a valid format, though it may not actually exist
-pub fn from_dbus_track_id(track_id: &mpris_server::TrackId) -> fdo::Result<Option<QueueItemId>> {
+pub fn from_dbus_track_id(track_id: &mpris_server::TrackId) -> fdo::Result<Option<QueuedTrackId>> {
     if *track_id == mpris_server::TrackId::NO_TRACK {
         return Ok(None);
     }
@@ -60,14 +60,14 @@ pub fn from_dbus_track_id(track_id: &mpris_server::TrackId) -> fdo::Result<Optio
     if let Some(track_id) = track_id.strip_prefix(TRACK_ID_PREFIX)
         && let Ok(track_id) = track_id.parse()
     {
-        Ok(Some(track_id))
+        Ok(Some(QueuedTrackId(track_id)))
     } else {
         Err(fdo::Error::InvalidArgs("Invalid track id".into()))
     }
 }
 
 /// Same as `from_dbus_track_id` except `mpris_server::TrackId::NO_TRACK` returns an invalid error instead of Ok(None)
-pub fn from_real_dbus_track_id(track_id: &mpris_server::TrackId) -> fdo::Result<QueueItemId> {
+pub fn from_real_dbus_track_id(track_id: &mpris_server::TrackId) -> fdo::Result<QueuedTrackId> {
     if let Some(track_id) = from_dbus_track_id(track_id)? {
         Ok(track_id)
     } else {
@@ -77,7 +77,7 @@ pub fn from_real_dbus_track_id(track_id: &mpris_server::TrackId) -> fdo::Result<
     }
 }
 
-pub fn generate_empty_metadata(track_id: QueueItemId) -> mpris_server::Metadata {
+pub fn generate_empty_metadata(track_id: QueuedTrackId) -> mpris_server::Metadata {
     let track_id = into_dbus_track_id(track_id);
     mpris_server::Metadata::builder().trackid(track_id).build()
 }
@@ -88,9 +88,8 @@ pub fn generate_metadata(track: QueuedTrack) -> mpris_server::Metadata {
 
     let mut builder = mpris_server::Metadata::builder()
         .trackid(track_id)
-        .artist(track.artists)
-        .genre(track.genres)
-        .comment(track.comments);
+        .artist(track.artist_text)
+        .genre(track.genres);
 
     if let Some(title) = track.title {
         builder = builder.title(title);
@@ -108,12 +107,7 @@ pub fn generate_metadata(track: QueuedTrack) -> mpris_server::Metadata {
         builder = builder.content_created(date);
     }
 
-    if let Some(duration) = track.total_duration {
-        builder = builder.length(as_dbus_time(duration));
-    }
-
-    let url = encode_file_url(&track.file_path);
-    builder = builder.url(url);
+    builder = builder.length(as_dbus_time(track.length));
 
     builder.build()
 }

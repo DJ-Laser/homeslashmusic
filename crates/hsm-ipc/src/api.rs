@@ -8,6 +8,7 @@ use std::fmt::Debug;
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
+pub use events::*;
 use thiserror::Error;
 pub use types::*;
 
@@ -121,7 +122,7 @@ pub(crate) mod private {
         fn [<handle_$name:snake>](&self, request: requests::$name) -> impl Future<Output = Result<$response, crate::Error>> + Send;
         )*
 
-        fn handle_parallel(&self, requests: Vec<impl Future<Output = Result<String, crate::Error>>>) -> impl Future<Output = Vec<Result<String, crate::Error>>> + Send;
+        fn handle_parallel(&self, requests: Vec<impl Future<Output = Result<String, crate::Error>> + Send>) -> impl Future<Output = Vec<Result<String, crate::Error>>> + Send;
     }
 }
 

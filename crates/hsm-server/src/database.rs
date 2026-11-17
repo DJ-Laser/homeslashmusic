@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::{
     io::Write as _,
     path::PathBuf,
@@ -21,6 +19,8 @@ mod jobs;
 mod sources;
 mod store;
 
+pub use sources::TrackLocation;
+
 #[derive(Debug)]
 struct MusicDatabase {
     db: RwLock<DatabaseStore>,
@@ -35,7 +35,7 @@ impl DatabaseHandle {
         JobContext::new(executor, self.clone())
     }
 
-    fn read_db<F, R>(&self, f: F) -> R
+    pub fn read_db<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&DatabaseStore) -> R,
     {

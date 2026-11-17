@@ -1,5 +1,6 @@
 mod albums;
 mod artists;
+mod ipc;
 mod mbid;
 mod playlists;
 mod songs;

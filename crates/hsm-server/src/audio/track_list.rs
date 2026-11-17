@@ -6,15 +6,18 @@ use std::{
     },
 };
 
-use hsm_ipc::{InsertPosition, QueueItemId, QueuedTrack, QueuedTrackMetadata};
+use hsm_ipc::{InsertPosition, QueuedTrack, QueuedTrackId, QueuedTrackMetadata};
 use rand::{Rng, seq::SliceRandom};
+
+use crate::database::TrackLocation;
 
 use super::PlayerError;
 
 /// A `LoadedTrack` with a `track_id` to uniquely identify it
 #[derive(Debug, Clone)]
 pub struct ArcTrackInstance {
-    pub id: QueueItemId,
+    pub id: QueuedTrackId,
+    pub loader: TrackLocation,
     pub metadata: Arc<QueuedTrackMetadata>,
 }
 
@@ -32,7 +35,7 @@ impl ArcTrackInstance {
 struct TrackListInner {
     track_list: Vec<ArcTrackInstance>,
     shuffled_track_indicies: Vec<usize>,
-    latest_track_id: QueueItemId,
+    latest_track_id: usize,
 }
 
 impl TrackListInner {
@@ -63,14 +66,17 @@ impl TrackListInner {
     pub fn insert_tracks(
         &mut self,
         index: usize,
-        tracks: &[Arc<QueuedTrackMetadata>],
+        tracks: Vec<(TrackLocation, Arc<QueuedTrackMetadata>)>,
     ) -> impl Iterator<Item = usize> {
         debug_assert_eq!(self.track_list.len(), self.shuffled_track_indicies.len());
 
-        let track_instances = tracks.iter().map(|track| {
+        let num_tracks = tracks.len();
+        let track_instances = tracks.into_iter().map(|track| {
+            let (location, metadata) = track;
             let track_instance = ArcTrackInstance {
-                metadata: track.clone(),
-                id: self.latest_track_id,
+                loader: location,
+                metadata: metadata.clone(),
+                id: QueuedTrackId(self.latest_track_id),
             };
 
             self.latest_track_id += 1;
@@ -82,12 +88,12 @@ impl TrackListInner {
         // Update shuffle indicies to point to the updated track positions
         for shuffle_index in &mut self.shuffled_track_indicies {
             if *shuffle_index >= index {
-                *shuffle_index += tracks.len();
+                *shuffle_index += num_tracks;
             }
         }
 
         // return shuffle indicies corresponding to the inserted tracks
-        index..index + tracks.len()
+        index..index + num_tracks
     }
 
     /// Shuffles the `shuffled_track_indicies`
@@ -153,7 +159,7 @@ impl TrackList {
         self.len.load(Ordering::Acquire)
     }
 
-    pub fn get_track_index(&self, track_id: QueueItemId) -> Option<usize> {
+    pub fn get_track_index(&self, track_id: QueuedTrackId) -> Option<usize> {
         let inner = self.inner.lock().unwrap();
         (0..inner.len()).find(|&index| inner[index].id == track_id)
     }
@@ -229,7 +235,7 @@ impl TrackList {
         &self,
         current_index: usize,
         position: InsertPosition,
-        tracks: &[Arc<QueuedTrackMetadata>],
+        tracks: Vec<(TrackLocation, Arc<QueuedTrackMetadata>)>,
         set_as_current: bool,
     ) -> Result<usize, PlayerError> {
         let mut inner = self.inner.lock().unwrap();
@@ -243,7 +249,8 @@ impl TrackList {
                     .iter()
                     .map(|track| track.id)
                     .find(|id| *id == track_id)
-                    .ok_or(PlayerError::TrackIdNotFound(track_id))?;
+                    .ok_or(PlayerError::TrackIdNotFound(track_id))?
+                    .0;
 
                 track_index + 1
             }

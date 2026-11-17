@@ -8,7 +8,10 @@ use requests::private::_handle_single;
 pub use requests::private::RequestHandler;
 
 /// Handle a request from a hsm client
-pub async fn handle_request<R: RequestHandler>(request_data: &str, request_handler: &R) -> String {
+pub async fn handle_request<R: RequestHandler + Send + Sync>(
+    request_data: &str,
+    request_handler: &R,
+) -> String {
     let response = handle_request_internal(request_data, request_handler).await;
     let mut reply_data =
         serde_json::to_string(&response).expect("Responses should not fail to serialize");
@@ -16,7 +19,7 @@ pub async fn handle_request<R: RequestHandler>(request_data: &str, request_handl
     reply_data
 }
 
-async fn handle_request_internal<R: RequestHandler>(
+async fn handle_request_internal<R: RequestHandler + Send + Sync>(
     request_data: &str,
     request_handler: &R,
 ) -> ResponseMessage {

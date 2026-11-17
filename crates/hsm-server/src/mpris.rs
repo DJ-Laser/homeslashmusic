@@ -56,6 +56,8 @@ async fn on_event(event: Event, server: &Server<MprisImpl>) -> Result<(), MprisS
                 })
                 .await?;
         }
+
+        _ => (),
     }
 
     Ok(())

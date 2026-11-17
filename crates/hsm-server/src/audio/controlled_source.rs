@@ -3,15 +3,13 @@ use std::{
     time::Duration,
 };
 
-use hsm_ipc::SeekPosition;
+use hsm_ipc::{LoopMode, PlaybackState, SeekPosition};
 use rodio::{
     Source,
     source::{Amplify, Pausable, SeekError as RodioSeekError, TrackPosition},
 };
 use smol::channel::Sender;
 use thiserror::Error;
-
-use super::{LoopMode, PlaybackState};
 
 type SeekResult = Result<(), SeekError>;
 

@@ -3,7 +3,6 @@ resolver = "3"
 members = [
   "crates/hsm-ipc",
   "crates/hsm-server",
-  "crates/hsm-cli",
 ]
 
 [workspace.package]

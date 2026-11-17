@@ -1,9 +1,8 @@
-use hsm_ipc::QueueItemId;
 use serde::{Deserialize, Serialize};
 
 use crate::database::{
     sources::PlaylistLocation,
-    store::{AlbumId, DatabaseStore, Lookup, MissingDatabaseId, SongId, TrackGroupId},
+    store::{AlbumId, DatabaseStore, Lookup, MissingDatabaseId, SongId, TrackGroupId, TrackId},
 };
 
 slotmap::new_key_type! {
@@ -13,7 +12,7 @@ slotmap::new_key_type! {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PlaylistEntry {
     /// Play the specified track
-    Track(QueueItemId),
+    Track(TrackId),
     /// Play the preferred track for the song
     Song(SongId),
     /// Play the specified track group

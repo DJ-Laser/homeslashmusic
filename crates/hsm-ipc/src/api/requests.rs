@@ -1,4 +1,4 @@
-use std::{path::PathBuf, time::Duration};
+use std::time::Duration;
 
 use crate::{
     InsertPosition, LoopMode, PlaybackState, QueuedTrack, QueuedTrackId, SeekOffset, TrackId,
@@ -66,5 +66,5 @@ make_requests! {
     pub tracks: Vec<TrackId>,
     /// Set the first track inserted as the current one
     pub set_as_current: bool,
-  } -> Vec<(PathBuf, (TrackId, String))>;
+  } -> Vec<TrackId>;
 }

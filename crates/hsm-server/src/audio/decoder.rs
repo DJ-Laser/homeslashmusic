@@ -1,14 +1,21 @@
-use std::{
-    fs::File,
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::{fs::File, io, path::Path, time::Duration};
 
 use rodio::{
-    ChannelCount, Decoder, Sample, SampleRate, Source, source::SeekError as RodioSeekError,
+    ChannelCount, Decoder, Sample, SampleRate, Source, decoder::DecoderError,
+    source::SeekError as RodioSeekError,
 };
+use thiserror::Error;
 
-use crate::audio::track::LoadTrackError;
+use crate::database::TrackLocation;
+
+#[derive(Debug, Error)]
+pub enum LoadTrackError {
+    #[error("{0}")]
+    Open(#[source] io::Error),
+
+    #[error("{0}")]
+    CreateTrackDecoderFailed(#[source] DecoderError),
+}
 
 /// A `Source` that decodes `Track`s using symphonia
 pub(crate) struct TrackDecoder {
@@ -16,13 +23,19 @@ pub(crate) struct TrackDecoder {
 }
 
 impl TrackDecoder {
-    pub async fn new(path: PathBuf) -> Result<Self, LoadTrackError> {
-        smol::unblock(move || Self::new_sync(&path)).await
+    pub async fn new(location: TrackLocation) -> Result<Self, LoadTrackError> {
+        smol::unblock(move || Self::new_sync(location)).await
     }
 
-    fn new_sync(path: &Path) -> Result<Self, LoadTrackError> {
-        let file = File::open(path).map_err(LoadTrackError::OpenFailed)?;
-        let len = file.metadata().map_err(LoadTrackError::OpenFailed)?.len();
+    fn new_sync(location: TrackLocation) -> Result<Self, LoadTrackError> {
+        match location {
+            TrackLocation::LocalFile(path) => Self::new_local(&path),
+        }
+    }
+
+    fn new_local(path: &Path) -> Result<Self, LoadTrackError> {
+        let file = File::open(path).map_err(LoadTrackError::Open)?;
+        let len = file.metadata().map_err(LoadTrackError::Open)?.len();
         let mut decoder = Decoder::builder().with_data(file).with_byte_len(len);
 
         if let Some(hint) = path.extension().and_then(|s| s.to_str()) {
