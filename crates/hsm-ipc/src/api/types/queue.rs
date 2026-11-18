@@ -2,7 +2,21 @@ use std::{fmt::Display, time::Duration};
 
 use serde::{Deserialize, Serialize};
 
-use crate::TrackId;
+use crate::{AlbumId, SongId, TrackGroupId, TrackId};
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum InsertItem {
+    /// Insert the specified track
+    Track(TrackId),
+    /// Insert the preferred track for the song
+    Song(SongId),
+    /// Insert the specified track group
+    TrackGroup(TrackGroupId),
+    /// Insert the preferred track group for the album
+    Album(AlbumId),
+    // /// Insert the contents of the playlist
+    // Playlist(PlaylistId),
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InsertPosition {
@@ -38,7 +52,7 @@ pub struct QueuedTrackMetadata {
     pub track_id: TrackId,
     pub length: Duration,
 
-    pub title: Option<String>,
+    pub title: String,
     pub album: Option<String>,
     pub track_number: Option<u32>,
     pub artist_text: Option<String>,

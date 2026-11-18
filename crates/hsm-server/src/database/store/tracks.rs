@@ -32,7 +32,7 @@ pub struct TrackData {
     pub track_group: Option<TrackGroupId>,
 
     /// The name of this track
-    pub title: Option<String>,
+    pub title: String,
     /// The length of this track
     pub length: Duration,
     /// The track number of this track

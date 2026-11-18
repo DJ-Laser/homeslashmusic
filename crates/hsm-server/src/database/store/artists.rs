@@ -60,7 +60,7 @@ pub struct ArtistData {
     pub derived: DerivedArtistData,
 
     /// Name of the artist
-    pub name: Option<String>,
+    pub name: String,
     /// Sorting key for the artist
     pub sort_name: Option<String>,
     /// The genres associated with this artist, sorted by relevance

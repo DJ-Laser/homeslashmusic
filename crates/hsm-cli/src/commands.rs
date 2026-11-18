@@ -4,24 +4,23 @@ use crate::cli::{Cli, Command, QueueCommand};
 use crate::ipc::send_request;
 use hsm_ipc::{InsertPosition, LoopMode, QueuedTrack, SeekOffset, requests};
 
-fn try_load_tracks(
-    position: InsertPosition,
-    paths: &[PathBuf],
-    set_as_current: bool,
-) -> Result<(), crate::Error> {
+fn try_load_tracks(position: InsertPosition, paths: Vec<PathBuf>) -> Result<(), crate::Error> {
     let mut absolute_paths = Vec::new();
     for path in paths {
-        absolute_paths.push(path::absolute(path).map_err(crate::Error::GetCurrentDirFailed)?);
+        absolute_paths.push(
+            path::absolute(path)
+                .map_err(crate::Error::GetCurrentDirFailed)?
+                .to_string_lossy()
+                .into_owned(),
+        );
     }
 
-    let errors = send_request(requests::LoadTracks {
-        position,
-        paths: absolute_paths,
-        set_as_current,
-    })?;
+    let tracks = send_request(requests::LookupTracks(absolute_paths))?;
 
-    for (path, error) in errors {
-        eprintln!("Failed to load track {}: {error}", path.display());
+    let errors = send_request(requests::LoadTracks(tracks, position))?;
+
+    for track_id in errors {
+        eprintln!("Failed to load track {}", track_id.0);
     }
 
     Ok(())
@@ -32,25 +31,32 @@ fn handle_queue_command(command: QueueCommand) -> Result<(), crate::Error> {
         QueueCommand::Clear => send_request(requests::ClearQueue)?,
         QueueCommand::Replace { tracks } => {
             send_request(requests::ClearQueue)?;
-            try_load_tracks(InsertPosition::Start, &tracks.paths, false)?;
+            try_load_tracks(InsertPosition::Start, tracks.paths)?;
         }
-        QueueCommand::Add { tracks } => try_load_tracks(InsertPosition::End, &tracks.paths, false)?,
+        QueueCommand::Add { tracks } => try_load_tracks(InsertPosition::End, tracks.paths)?,
         QueueCommand::Next { tracks } => {
-            try_load_tracks(InsertPosition::Next, &tracks.paths, false)?;
+            try_load_tracks(InsertPosition::Next, tracks.paths)?;
         }
     }
 
     Ok(())
 }
 
-fn print_queue(tracks: Vec<QueuedTrack>) {
-    for QueuedTrack { metadata, .. } in tracks {
-        let title = metadata
-            .title
-            .unwrap_or_else(|| metadata.file_path.to_string_lossy().into_owned());
+fn print_queue() -> Result<(), crate::Error> {
+    let tracks = send_request(requests::GetQueuedTracks)?;
+    let current_track_id = send_request(requests::GetCurrentQueuedTrackId)?;
 
-        println!("| {title}");
+    for QueuedTrack { metadata, id, .. } in tracks {
+        if let Some(current_id) = current_track_id
+            && current_id == id
+        {
+            println!("> {}", metadata.title);
+        } else {
+            println!("| {}", metadata.title);
+        }
     }
+
+    Ok(())
 }
 
 pub fn handle_command(command: Cli) -> Result<(), crate::Error> {
@@ -58,7 +64,7 @@ pub fn handle_command(command: Cli) -> Result<(), crate::Error> {
         Command::Play { tracks } => {
             if let Some(tracks) = tracks {
                 send_request(requests::ClearQueue)?;
-                try_load_tracks(InsertPosition::Start, &tracks.paths, false)?;
+                try_load_tracks(InsertPosition::Start, tracks.paths)?;
             }
 
             send_request(requests::Play)?;
@@ -68,7 +74,7 @@ pub fn handle_command(command: Cli) -> Result<(), crate::Error> {
         Command::Stop => send_request(requests::StopPlayback)?,
 
         Command::Next => send_request(requests::GoToNextTrack)?,
-        Command::Previous => send_request(requests::GoToPreviousTrack { soft: true })?,
+        Command::Previous => send_request(requests::GoToPreviousTrack)?,
 
         Command::Loop { loop_mode } => {
             if let Some(loop_mode) = loop_mode {
@@ -118,8 +124,7 @@ pub fn handle_command(command: Cli) -> Result<(), crate::Error> {
             } else if let Some(tracks) = tracks {
                 handle_queue_command(QueueCommand::Add { tracks })?;
             } else {
-                let track_queue = send_request(requests::GetQueuedTracks)?;
-                print_queue(track_queue);
+                print_queue()?;
             }
         }
     }

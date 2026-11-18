@@ -8,8 +8,8 @@ use std::{
 
 use futures_concurrency::concurrent_stream::{ConcurrentStream, IntoConcurrentStream};
 use hsm_ipc::{
-    LoopMode, PlaybackState, QueuedTrack, QueuedTrackId, SeekPosition, TrackId, requests,
-    server::RequestHandler,
+    LoopMode, PlaybackState, QueuedTrack, QueuedTrackId, SearchResult, SeekPosition, TrackId,
+    requests, server::RequestHandler,
 };
 use log::error;
 use smol::{
@@ -308,32 +308,18 @@ impl RequestHandler for AppHandle {
 
     async fn handle_load_tracks(
         &self,
-        requests::LoadTracks {
-            tracks,
-            position,
-            set_as_current,
-        }: requests::LoadTracks,
+        requests::LoadTracks(item, position): requests::LoadTracks,
     ) -> Result<Vec<TrackId>, hsm_ipc::Error> {
-        let mut errors = Vec::new();
-        let tracks: Vec<_> = self.database.read_db(|db| {
-            tracks
-                .into_iter()
-                .filter_map(|id| {
-                    let track = db.queue_track(id.into());
-                    if track.is_err() {
-                        errors.push(id);
-                    }
+        let (tracks, errors) = self.database.read_db(|db| db.queue_insertion(item));
 
-                    track.ok()
-                })
-                .map(|(location, matadata)| (location, Arc::new(matadata)))
-                .collect()
-        });
-
-        self.player
-            .insert_tracks(position, tracks, set_as_current)
-            .await?;
+        self.player.insert_tracks(position, tracks).await?;
 
         Ok(errors)
+    }
+
+    async fn handle_search(
+        &self,
+        requests::Search(search_query): requests::Search,
+    ) -> Result<Option<SearchResult>, hsm_ipc::Error> {
     }
 }

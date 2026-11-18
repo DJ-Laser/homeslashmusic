@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 use slotmap::DenseSlotMap;
 
 use crate::database::store::{
-    ArtistData, ArtistId, DatabaseStore, Lookup, MissingDatabaseId, MusicBrainzId, TrackGroupId,
+    ArtistData, ArtistId, DatabaseStore, Lookup, MissingDatabaseId, MusicBrainzId, SongId,
+    TrackGroupId,
 };
 
 slotmap::new_key_type! {
@@ -13,16 +14,23 @@ slotmap::new_key_type! {
 
 #[derive(Debug, Clone, Default)]
 pub struct DerivedAlbumData {
+    pub(super) songs: Vec<SongId>,
     pub(super) track_groups: Vec<TrackGroupId>,
 }
 
 impl DerivedAlbumData {
-    /// Tracks in this album
-    pub fn songs(&self) -> &Vec<TrackGroupId> {
+    /// Songs in this album
+    pub fn songs(&self) -> &Vec<SongId> {
+        &self.songs
+    }
+
+    /// Track groups for this album
+    pub fn track_groups(&self) -> &Vec<TrackGroupId> {
         &self.track_groups
     }
 
     pub(super) fn clear(&mut self) {
+        self.songs.clear();
         self.track_groups.clear();
     }
 }
@@ -36,7 +44,7 @@ pub struct AlbumData {
     pub derived: DerivedAlbumData,
 
     /// Name of the album
-    pub title: Option<String>,
+    pub title: String,
     /// The date this album was released
     pub date: Option<String>,
     /// The genres associated with this album, sorted by relevance
@@ -46,6 +54,16 @@ pub struct AlbumData {
     pub artists: Vec<ArtistId>,
     /// The string representation of the album's artists. May include separators like "feat."
     pub artists_text: Option<String>,
+}
+
+impl AlbumData {
+    pub fn search_string(&self) -> String {
+        if let Some(artists_text) = &self.artists_text {
+            format!("{} - {}", self.title, artists_text)
+        } else {
+            format!("{}", self.title)
+        }
+    }
 }
 
 impl DatabaseStore {

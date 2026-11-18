@@ -179,3 +179,12 @@ pub struct Artist {
     /// The genres associated with this artist, sorted by relevance
     pub genres: Vec<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SearchResult {
+    Track(TrackId),
+    Song(SongId),
+    TrackGroup(TrackGroupId),
+    Album(AlbumId),
+    Artist(ArtistId),
+}

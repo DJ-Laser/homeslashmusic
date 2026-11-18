@@ -1,13 +1,17 @@
 use std::time::Duration;
 
 use crate::{
-    InsertPosition, LoopMode, PlaybackState, QueuedTrack, QueuedTrackId, SeekOffset, TrackId,
-    Version, make_requests,
+    InsertItem, InsertPosition, LoopMode, PlaybackState, QueuedTrack, QueuedTrackId, SearchResult,
+    SeekOffset, TrackId, Version, make_requests,
 };
 
 make_requests! {
   /// Get the `hsm_ipc::version()` of the server.
   GetVersion() -> Version;
+
+  // ####################
+  // ## Queue/Playback ##
+  // ####################
 
   GetPlaybackState() -> PlaybackState;
   Play() -> ();
@@ -53,7 +57,7 @@ make_requests! {
 
   /// Get the metadata for the tracks in the queue.
   GetQueuedTracks() -> Vec<QueuedTrack>;
-  /// Get only the metaqueued track id for the tracks in the queue.
+  /// Get only the queued track id for the tracks in the queue.
   GetQueuedTrackIds() -> Vec<QueuedTrackId>;
 
   /// Remove all tracks from the queue and stop playback.
@@ -61,10 +65,11 @@ make_requests! {
 
   /// Load tracks from the database into the queue.
   /// Any track ids that failed to load will be returned.
-  LoadTracks {
-    pub position: InsertPosition,
-    pub tracks: Vec<TrackId>,
-    /// Set the first track inserted as the current one
-    pub set_as_current: bool,
-  } -> Vec<TrackId>;
+  LoadTracks(InsertItem,InsertPosition) -> Vec<TrackId>;
+
+  // ##############
+  // ## Dataabse ##
+  // ##############
+
+  Search(String) -> Option<SearchResult>;
 }

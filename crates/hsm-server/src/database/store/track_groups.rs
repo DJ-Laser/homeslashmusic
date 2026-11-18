@@ -42,7 +42,7 @@ pub struct TrackGroupData {
     pub album: Option<AlbumId>,
 
     /// Name of the track group
-    pub title: Option<String>,
+    pub title: String,
     /// The total number of tracks included in this track group
     pub track_count: Option<u32>,
 

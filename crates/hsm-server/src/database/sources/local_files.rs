@@ -97,7 +97,7 @@ fn get_artists(ctx: &JobContext, tag: &Tag, album: bool) -> Vec<ArtistId> {
                 locations: location.into_iter().collect(),
                 derived: DerivedArtistData::default(),
 
-                name: name.map(Into::into),
+                name: name.unwrap_or("Unknown Artist").into(),
                 sort_name: None,
                 genres: Vec::new(),
             });
@@ -177,7 +177,7 @@ fn get_song(ctx: &JobContext, tag: &Tag) -> Option<SongId> {
             mbid,
             derived: DerivedSongData::default(),
 
-            title,
+            title: title.unwrap_or_else(|| "Unknown Album".into()),
             length,
             date,
             genres,
@@ -212,7 +212,7 @@ fn get_album(ctx: &JobContext, tag: &Tag) -> Option<AlbumId> {
             mbid,
             derived: DerivedAlbumData::default(),
 
-            title,
+            title: title.unwrap_or_else(|| "Unknown Album".into()),
             artists,
             artists_text,
             genres,
@@ -251,7 +251,7 @@ fn get_track_group(ctx: &JobContext, tag: &Tag) -> Option<TrackGroupId> {
 
             album,
 
-            title: Some(title),
+            title,
             track_count,
 
             artists,
@@ -265,7 +265,7 @@ fn get_track_group(ctx: &JobContext, tag: &Tag) -> Option<TrackGroupId> {
 async fn load_song_file(ctx: JobContext, path: PathBuf) -> Result<TrackId, LoadFileError> {
     let location = TrackLocation::LocalFile(path.clone());
 
-    let (length, Some(ref tag)) = parse_file_tags(path).await? else {
+    let (length, Some(ref tag)) = parse_file_tags(path.clone()).await? else {
         return Err(LoadFileError::MissingTags);
     };
 
@@ -285,7 +285,12 @@ async fn load_song_file(ctx: JobContext, path: PathBuf) -> Result<TrackId, LoadF
             song,
             track_group,
 
-            title,
+            title: title.unwrap_or_else(|| {
+                path.file_stem()
+                    .expect("load_song_file needs a file path")
+                    .to_string_lossy()
+                    .into_owned()
+            }),
             length,
             track_number,
 

@@ -21,11 +21,11 @@ pub enum Error {
     #[error("Failed to get the working directory: {0}")]
     GetCurrentDirFailed(io::Error),
 
-    #[error("Failed to deserialize reply from server")]
-    Deserialize(#[source] serde_json::Error),
+    #[error("Failed to deserialize reply from server: {0}")]
+    Deserialize(#[from] hsm_ipc::client::ParseError),
 
-    #[error("Error: {0}")]
-    Server(String),
+    #[error("Error when sending ipc request: {0}")]
+    Server(#[from] hsm_ipc::Error),
 }
 fn main() -> Result<(), crate::Error> {
     let command = Cli::parse();

@@ -3,6 +3,7 @@ mod artists;
 mod ipc;
 mod mbid;
 mod playlists;
+mod search;
 mod songs;
 mod track_groups;
 mod tracks;
@@ -17,6 +18,7 @@ pub use albums::*;
 pub use artists::*;
 pub use mbid::*;
 pub use playlists::*;
+pub use search::*;
 pub use songs::*;
 pub use track_groups::*;
 pub use tracks::*;
@@ -146,7 +148,7 @@ impl DatabaseStore {
         for (_, track) in &self.tracks {
             println!(
                 "{} - {}",
-                track.title.as_deref().unwrap_or("Unknown Track"),
+                track.title,
                 track.artists_text.as_deref().unwrap_or("Unknown Artist")
             );
         }
@@ -157,10 +159,7 @@ impl DatabaseStore {
         for (_, track_group) in &self.track_groups {
             println!(
                 "{} - {} ({} tracks)",
-                track_group
-                    .title
-                    .as_deref()
-                    .unwrap_or("Unknown Track Group"),
+                track_group.title,
                 track_group
                     .artists_text
                     .as_deref()
@@ -175,7 +174,7 @@ impl DatabaseStore {
         for (_, song) in &self.songs {
             println!(
                 "{} - {}, ({} mixed songs)",
-                song.title.as_deref().unwrap_or("Unknown Song"),
+                song.title,
                 song.artists_text.as_deref().unwrap_or("Unknown Artist"),
                 song.mix_songs.len()
             );
@@ -187,7 +186,7 @@ impl DatabaseStore {
         for (_, album) in &self.albums {
             println!(
                 "{} - {}, ({} track groups)",
-                album.title.as_deref().unwrap_or("Unknown Album"),
+                album.title,
                 album.artists_text.as_deref().unwrap_or("Unknown Artist"),
                 album.derived.track_groups.len()
             );
@@ -199,7 +198,7 @@ impl DatabaseStore {
         for (_, artist) in &self.artists {
             println!(
                 "{}, ({} songs and {} albums)",
-                artist.name.as_deref().unwrap_or("Unknown Artist"),
+                artist.name,
                 artist.derived.songs.len(),
                 artist.derived.albums.len(),
             );

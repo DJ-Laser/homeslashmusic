@@ -14,6 +14,7 @@ slotmap.workspace = true
 arc-swap.workspace = true
 float-cmp.workspace = true
 thiserror.workspace = true
+nucleo-matcher.workspace = true
 
 log.workspace = true
 env_logger.workspace = true

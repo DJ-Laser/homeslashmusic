@@ -91,9 +91,7 @@ pub fn generate_metadata(track: QueuedTrack) -> mpris_server::Metadata {
         .artist(track.artist_text)
         .genre(track.genres);
 
-    if let Some(title) = track.title {
-        builder = builder.title(title);
-    }
+    builder = builder.title(track.title);
 
     if let Some(album) = track.album {
         builder = builder.album(album);

@@ -90,7 +90,7 @@ fn insert_artist(
         locations: Vec::new(),
         derived: DerivedArtistData::default(),
 
-        name: Some(mb_artist.name),
+        name: mb_artist.name,
         sort_name: Some(mb_artist.sort_name),
         genres: get_genres(mb_artist.genres),
     };
@@ -161,7 +161,7 @@ fn insert_album(
         mbid,
         derived: DerivedAlbumData::default(),
 
-        title: Some(mb_release_group.title),
+        title: mb_release_group.title,
         date: mb_release_group.first_release_date.map(Into::into),
         genres: get_genres(mb_release_group.genres),
 
@@ -203,7 +203,7 @@ fn insert_song(
         mbid,
         derived: DerivedSongData::default(),
 
-        title: Some(mb_recording.title),
+        title: mb_recording.title,
         length: mb_recording
             .length
             .map(|ms| Duration::from_millis(u64::from(ms))),

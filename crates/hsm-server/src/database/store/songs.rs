@@ -36,7 +36,7 @@ pub struct SongData {
     pub derived: DerivedSongData,
 
     /// Name of the song
-    pub title: Option<String>,
+    pub title: String,
     /// The length of this song
     pub length: Option<Duration>,
     /// The date this song was released
