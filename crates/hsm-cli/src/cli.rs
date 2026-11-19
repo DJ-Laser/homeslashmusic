@@ -13,7 +13,7 @@ pub struct Cli {
 pub enum Command {
     Play {
         #[command(flatten)]
-        tracks: Option<TrackPaths>,
+        query: Option<SearchQuery>,
     },
 
     Pause,
@@ -49,7 +49,11 @@ pub enum Command {
         #[command(subcommand)]
         command: Option<QueueCommand>,
         #[command(flatten)]
-        tracks: Option<TrackPaths>,
+        query: Option<SearchQuery>,
+    },
+
+    Update {
+        path: PathBuf,
     },
 }
 
@@ -58,23 +62,29 @@ pub enum QueueCommand {
     Clear,
     Replace {
         #[command(flatten)]
-        tracks: TrackPaths,
+        query: SearchQuery,
     },
     #[command(alias = "append")]
     Add {
         #[command(flatten)]
-        tracks: TrackPaths,
+        query: SearchQuery,
     },
     Next {
         #[command(flatten)]
-        tracks: TrackPaths,
+        query: SearchQuery,
     },
 }
 
 #[derive(Debug, Args)]
-pub struct TrackPaths {
+pub struct SearchQuery {
     #[arg(num_args = 1..)]
-    pub paths: Vec<PathBuf>,
+    words: Vec<String>,
+}
+
+impl SearchQuery {
+    pub fn string(&self) -> String {
+        self.words.join(" ")
+    }
 }
 
 #[derive(Debug, Clone, ValueEnum)]

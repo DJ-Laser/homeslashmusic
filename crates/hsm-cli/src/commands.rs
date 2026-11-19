@@ -1,27 +1,24 @@
-use std::path::{self, PathBuf};
+use std::path;
 
-use crate::cli::{Cli, Command, QueueCommand};
+use crate::cli::{Cli, Command, QueueCommand, SearchQuery};
 use crate::ipc::send_request;
 use hsm_ipc::{InsertPosition, LoopMode, QueuedTrack, SeekOffset, requests};
 
-fn try_load_tracks(position: InsertPosition, paths: Vec<PathBuf>) -> Result<(), crate::Error> {
-    let mut absolute_paths = Vec::new();
-    for path in paths {
-        absolute_paths.push(
-            path::absolute(path)
-                .map_err(crate::Error::GetCurrentDirFailed)?
-                .to_string_lossy()
-                .into_owned(),
-        );
-    }
+fn try_load_tracks(
+    position: InsertPosition,
+    search_query: &SearchQuery,
+) -> Result<(), crate::Error> {
+    let search_results = send_request(requests::Search(search_query.string()))?;
 
-    let tracks = send_request(requests::LookupTracks(absolute_paths))?;
+    let Some(insert_item) = search_results
+        .into_iter()
+        .find_map(|(search_result, _)| search_result.try_into().ok())
+    else {
+        eprintln!("No results found for \"{}\"", search_query.string());
+        return Ok(());
+    };
 
-    let errors = send_request(requests::LoadTracks(tracks, position))?;
-
-    for track_id in errors {
-        eprintln!("Failed to load track {}", track_id.0);
-    }
+    send_request(requests::LoadTracks(insert_item, position))?;
 
     Ok(())
 }
@@ -29,13 +26,13 @@ fn try_load_tracks(position: InsertPosition, paths: Vec<PathBuf>) -> Result<(), 
 fn handle_queue_command(command: QueueCommand) -> Result<(), crate::Error> {
     match command {
         QueueCommand::Clear => send_request(requests::ClearQueue)?,
-        QueueCommand::Replace { tracks } => {
+        QueueCommand::Replace { query } => {
             send_request(requests::ClearQueue)?;
-            try_load_tracks(InsertPosition::Start, tracks.paths)?;
+            try_load_tracks(InsertPosition::Start, &query)?;
         }
-        QueueCommand::Add { tracks } => try_load_tracks(InsertPosition::End, tracks.paths)?,
-        QueueCommand::Next { tracks } => {
-            try_load_tracks(InsertPosition::Next, tracks.paths)?;
+        QueueCommand::Add { query } => try_load_tracks(InsertPosition::End, &query)?,
+        QueueCommand::Next { query } => {
+            try_load_tracks(InsertPosition::Next, &query)?;
         }
     }
 
@@ -61,10 +58,10 @@ fn print_queue() -> Result<(), crate::Error> {
 
 pub fn handle_command(command: Cli) -> Result<(), crate::Error> {
     match command.command {
-        Command::Play { tracks } => {
-            if let Some(tracks) = tracks {
+        Command::Play { query } => {
+            if let Some(query) = query {
                 send_request(requests::ClearQueue)?;
-                try_load_tracks(InsertPosition::Start, tracks.paths)?;
+                try_load_tracks(InsertPosition::Start, &query)?;
             }
 
             send_request(requests::Play)?;
@@ -118,14 +115,19 @@ pub fn handle_command(command: Cli) -> Result<(), crate::Error> {
             }
         },
 
-        Command::Queue { command, tracks } => {
+        Command::Queue { command, query } => {
             if let Some(command) = command {
                 handle_queue_command(command)?;
-            } else if let Some(tracks) = tracks {
-                handle_queue_command(QueueCommand::Add { tracks })?;
+            } else if let Some(query) = query {
+                handle_queue_command(QueueCommand::Add { query })?;
             } else {
                 print_queue()?;
             }
+        }
+
+        Command::Update { path } => {
+            let absolute_path = path::absolute(path).map_err(crate::Error::AbsolutePathFailed)?;
+            send_request(requests::UpdateDatabase(absolute_path))?;
         }
     }
 

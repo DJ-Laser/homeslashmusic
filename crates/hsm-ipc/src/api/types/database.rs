@@ -2,6 +2,8 @@ use std::{fmt::Display, time::Duration};
 
 use serde::{Deserialize, Serialize};
 
+use crate::InsertItem;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct MusicBrainzId(uuid::Uuid);
 
@@ -187,4 +189,18 @@ pub enum SearchResult {
     TrackGroup(TrackGroupId),
     Album(AlbumId),
     Artist(ArtistId),
+}
+
+impl TryFrom<SearchResult> for InsertItem {
+    type Error = SearchResult;
+
+    fn try_from(value: SearchResult) -> Result<Self, Self::Error> {
+        match value {
+            SearchResult::Track(track_id) => Ok(InsertItem::Track(track_id)),
+            SearchResult::Song(song_id) => Ok(InsertItem::Song(song_id)),
+            SearchResult::TrackGroup(track_group_id) => Ok(InsertItem::TrackGroup(track_group_id)),
+            SearchResult::Album(album_id) => Ok(InsertItem::Album(album_id)),
+            SearchResult::Artist(artist_id) => Err(SearchResult::Artist(artist_id)),
+        }
+    }
 }

@@ -13,8 +13,8 @@ pub async fn handle_request<R: RequestHandler + Send + Sync>(
     request_handler: &R,
 ) -> String {
     let response = handle_request_internal(request_data, request_handler).await;
-    let mut reply_data =
-        serde_json::to_string(&response).expect("Responses should not fail to serialize");
+    let mut reply_data = serde_json::to_string::<ResponseMessage>(&response)
+        .expect("Responses should not fail to serialize");
     reply_data.push('\n');
     reply_data
 }
@@ -77,7 +77,6 @@ async fn handle_request_internal<R: RequestHandler + Send + Sync>(
     }
 }
 
-pub(crate) fn serialize_response<R: Request>(response: R::Response) -> String {
-    serde_json::to_string(&Ok::<R::Response, Error>(response))
-        .expect("Responses should not fail to serialize")
+pub(crate) fn serialize_response<R: Request>(response: &R::Response) -> String {
+    serde_json::to_string::<R::Response>(response).expect("Responses should not fail to serialize")
 }

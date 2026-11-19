@@ -69,7 +69,7 @@ where
 /// Serialized format for responses from the hsm server
 type ResponseMessage = Vec<Result<String, Error>>;
 
-macro_rules! make_requests {
+macro_rules! define_requests {
 (@doc $($doc:literal)* @def $name:ident ()) => {
     $(#[doc = $doc])*
     #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -109,7 +109,7 @@ pub(crate) mod private {
         let reply_data = match request {
         $(
             QualifiedRequest::$name(request) => {
-                crate::server::serialize_response::<super::$name>(handler.[<handle_$name:snake>](request).await?)
+                crate::server::serialize_response::<super::$name>(&handler.[<handle_$name:snake>](request).await?)
             }
         )*
         };
@@ -129,7 +129,7 @@ pub(crate) mod private {
     use private::QualifiedRequest;
 
     $(
-    make_requests!(@doc $($doc)* @def $name $fields);
+    define_requests!(@doc $($doc)* @def $name $fields);
 
     impl From<$name> for QualifiedRequest {
         fn from(value: $name) -> Self {
@@ -146,4 +146,4 @@ pub(crate) mod private {
 };
 }
 
-pub(crate) use make_requests;
+pub(crate) use define_requests;

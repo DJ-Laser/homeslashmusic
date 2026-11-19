@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{cmp, collections::HashSet};
 
 use nucleo_matcher::{Matcher, Utf32String, pattern::Pattern};
 
@@ -143,7 +143,7 @@ impl DatabaseStore {
 pub async fn run_search(
     ctx: JobContext,
     search_query: String,
-) -> Result<Option<SearchableEntityId>, MissingDatabaseId> {
+) -> Result<Vec<(SearchableEntityId, u32)>, MissingDatabaseId> {
     use nucleo_matcher::pattern::{AtomKind, CaseMatching, Normalization};
 
     let mut matcher = Matcher::new(nucleo_matcher::Config::DEFAULT);
@@ -156,14 +156,13 @@ pub async fn run_search(
 
     let items = ctx.read_db(DatabaseStore::get_searchable_entities)?;
 
-    let top_result = smol::unblock(move || {
-        let scores = items
-            .into_iter()
-            .map(|(item, haystack)| (item, pattern.score(haystack.slice_u32(..), &mut matcher)));
+    let mut scores: Vec<_> = items
+        .into_iter()
+        .map(|(item, haystack)| (item, pattern.score(haystack.slice_u32(..), &mut matcher)))
+        .filter_map(|(item, score)| score.map(|score| (item, score)))
+        .collect();
 
-        scores.max_by_key(|item| item.1).map(|item| item.0)
-    })
-    .await;
+    scores.sort_by_key(|(_, score)| cmp::Reverse(*score));
 
-    Ok(top_result)
+    Ok(scores)
 }

@@ -18,8 +18,8 @@ pub enum Error {
     #[error("Error communicating with server")]
     StreamReadWrite(#[source] io::Error),
 
-    #[error("Failed to get the working directory: {0}")]
-    GetCurrentDirFailed(io::Error),
+    #[error("Failed to make ansolute path: {0}")]
+    AbsolutePathFailed(io::Error),
 
     #[error("Failed to deserialize reply from server: {0}")]
     Deserialize(#[from] hsm_ipc::client::ParseError),

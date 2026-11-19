@@ -325,23 +325,26 @@ impl RequestHandler for AppHandle {
     ) -> Result<(), hsm_ipc::Error> {
         self.database
             .run_job(&self.executor, |ctx| database::start_update(ctx, request.0))
-            .await;
+            .detach();
+
         Ok(())
     }
 
     async fn handle_search(
         &self,
         requests::Search(search_query): requests::Search,
-    ) -> Result<Option<SearchResult>, hsm_ipc::Error> {
+    ) -> Result<Vec<(SearchResult, u32)>, hsm_ipc::Error> {
         let search_result = self
             .database
             .run_job(&self.executor, |ctx| {
                 database::run_search(ctx, search_query)
             })
             .await
-            .map_err(|error| hsm_ipc::Error::Server(error.to_string()))?
-            .map(Into::into);
+            .map_err(|error| hsm_ipc::Error::Server(error.to_string()))?;
 
-        Ok(search_result)
+        Ok(search_result
+            .into_iter()
+            .map(|(item, score)| (item.into(), score))
+            .collect())
     }
 }
