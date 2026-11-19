@@ -1,4 +1,4 @@
-use std::mem;
+use std::{fmt::Display, mem};
 
 use serde::{Deserialize, Serialize};
 
@@ -12,6 +12,12 @@ use crate::database::{
 
 slotmap::new_key_type! {
     pub struct ArtistId;
+}
+
+impl Display for ArtistId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.0)
+    }
 }
 
 #[derive(Debug, Clone, Default)]

@@ -24,9 +24,6 @@ use crate::database::{
 
 #[derive(Debug, Error)]
 pub enum MusicBrainzFetchError {
-    #[error("A query is already pending for {0}")]
-    PendingQuery(MusicBrainzId),
-
     #[error(transparent)]
     DbError(#[from] MissingDatabaseId),
 

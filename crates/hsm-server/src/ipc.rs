@@ -2,14 +2,13 @@ use std::{
     fs,
     mem::DropGuard,
     path::{Path, PathBuf},
-    sync::Arc,
     time::Duration,
 };
 
 use futures_concurrency::concurrent_stream::{ConcurrentStream, IntoConcurrentStream};
 use hsm_ipc::{
-    LoopMode, PlaybackState, QueuedTrack, QueuedTrackId, SearchResult, SeekPosition, TrackId,
-    requests, server::RequestHandler,
+    LoopMode, PlaybackState, QueuedTrack, QueuedTrackId, SearchResult, SeekPosition, requests,
+    server::RequestHandler,
 };
 use log::error;
 use smol::{
@@ -19,7 +18,7 @@ use smol::{
 };
 use thiserror::Error;
 
-use crate::{AppHandle, audio::PlayerError, ipc::IpcServerError::ListenerClosed};
+use crate::{AppHandle, audio::PlayerError, database, ipc::IpcServerError::ListenerClosed};
 
 #[derive(Debug, Error)]
 pub enum IpcServerError {
@@ -309,17 +308,40 @@ impl RequestHandler for AppHandle {
     async fn handle_load_tracks(
         &self,
         requests::LoadTracks(item, position): requests::LoadTracks,
-    ) -> Result<Vec<TrackId>, hsm_ipc::Error> {
-        let (tracks, errors) = self.database.read_db(|db| db.queue_insertion(item));
+    ) -> Result<QueuedTrackId, hsm_ipc::Error> {
+        let tracks = self
+            .database
+            .read_db(|db| db.queue_insertion(&item))
+            .map_err(|error| hsm_ipc::Error::Server(error.to_string()))?;
 
-        self.player.insert_tracks(position, tracks).await?;
+        let queued_id = self.player.insert_tracks(position, tracks, false).await?;
 
-        Ok(errors)
+        queued_id.ok_or(hsm_ipc::Error::Server("Failed to insert any tracks".into()))
+    }
+
+    async fn handle_update_database(
+        &self,
+        request: requests::UpdateDatabase,
+    ) -> Result<(), hsm_ipc::Error> {
+        self.database
+            .run_job(&self.executor, |ctx| database::start_update(ctx, request.0))
+            .await;
+        Ok(())
     }
 
     async fn handle_search(
         &self,
         requests::Search(search_query): requests::Search,
     ) -> Result<Option<SearchResult>, hsm_ipc::Error> {
+        let search_result = self
+            .database
+            .run_job(&self.executor, |ctx| {
+                database::run_search(ctx, search_query)
+            })
+            .await
+            .map_err(|error| hsm_ipc::Error::Server(error.to_string()))?
+            .map(Into::into);
+
+        Ok(search_result)
     }
 }

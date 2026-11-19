@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use serde::{Deserialize, Serialize};
 
 use crate::database::{
@@ -7,6 +9,12 @@ use crate::database::{
 
 slotmap::new_key_type! {
     pub struct PlaylistId;
+}
+
+impl Display for PlaylistId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.0)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

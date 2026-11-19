@@ -29,17 +29,17 @@ use crate::database::sources::{
 
 #[derive(Error, Debug)]
 pub enum MissingDatabaseId {
-    #[error("Database does not contain key {0:?}")]
+    #[error("Database does not contain track {0}")]
     Track(TrackId),
-    #[error("Database does not contain key {0:?}")]
+    #[error("Database does not contain track group {0}")]
     TrackGroup(TrackGroupId),
-    #[error("Database does not contain key {0:?}")]
+    #[error("Database does not contain song {0}")]
     Song(SongId),
-    #[error("Database does not contain key {0:?}")]
+    #[error("Database does not contain album {0}")]
     Album(AlbumId),
-    #[error("Database does not contain key {0:?}")]
+    #[error("Database does not contain artist {0}")]
     Artist(ArtistId),
-    #[error("Database does not contain key {0:?}")]
+    #[error("Database does not contain playlist {0}")]
     Playlist(PlaylistId),
 }
 
@@ -84,6 +84,8 @@ pub struct DatabaseStore {
 
 impl DatabaseStore {
     pub fn rebuild_derrived(&mut self) {
+        self.lookup.clear();
+
         for (_, song) in &mut self.songs {
             song.derived.clear();
         }

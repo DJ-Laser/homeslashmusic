@@ -237,7 +237,7 @@ impl TrackList {
         position: InsertPosition,
         tracks: Vec<(TrackLocation, Arc<QueuedTrackMetadata>)>,
         set_as_current: bool,
-    ) -> Result<usize, PlayerError> {
+    ) -> Result<(usize, Option<QueuedTrackId>), PlayerError> {
         let mut inner = self.inner.lock().unwrap();
 
         let track_list_started_empty = inner.len() == 0;
@@ -298,10 +298,12 @@ impl TrackList {
             new_current_index = insert_index;
         }
 
+        let first_id = inner.track_list.first().map(|track| track.id);
+
         if track_list_started_empty {
-            Ok(0)
+            Ok((0, first_id))
         } else {
-            Ok(new_current_index)
+            Ok((new_current_index, first_id))
         }
     }
 

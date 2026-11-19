@@ -1,8 +1,8 @@
-use std::time::Duration;
+use std::{path::PathBuf, time::Duration};
 
 use crate::{
     InsertItem, InsertPosition, LoopMode, PlaybackState, QueuedTrack, QueuedTrackId, SearchResult,
-    SeekOffset, TrackId, Version, make_requests,
+    SeekOffset, Version, make_requests,
 };
 
 make_requests! {
@@ -64,12 +64,15 @@ make_requests! {
   ClearQueue() -> ();
 
   /// Load tracks from the database into the queue.
-  /// Any track ids that failed to load will be returned.
-  LoadTracks(InsertItem,InsertPosition) -> Vec<TrackId>;
+  /// The id of the first queued track will be returned.
+  LoadTracks(InsertItem, InsertPosition) -> QueuedTrackId;
 
   // ##############
   // ## Dataabse ##
   // ##############
+
+  /// Start a full database update
+  UpdateDatabase(PathBuf) -> ();
 
   Search(String) -> Option<SearchResult>;
 }

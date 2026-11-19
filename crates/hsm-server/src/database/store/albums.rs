@@ -1,4 +1,4 @@
-use std::mem;
+use std::{fmt::Display, mem};
 
 use serde::{Deserialize, Serialize};
 use slotmap::DenseSlotMap;
@@ -10,6 +10,12 @@ use crate::database::store::{
 
 slotmap::new_key_type! {
     pub struct AlbumId;
+}
+
+impl Display for AlbumId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.0)
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -61,7 +67,7 @@ impl AlbumData {
         if let Some(artists_text) = &self.artists_text {
             format!("{} - {}", self.title, artists_text)
         } else {
-            format!("{}", self.title)
+            self.title.clone()
         }
     }
 }

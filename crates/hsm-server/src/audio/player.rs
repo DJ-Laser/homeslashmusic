@@ -462,10 +462,10 @@ impl Player {
         position: InsertPosition,
         tracks: Vec<(TrackLocation, Arc<QueuedTrackMetadata>)>,
         set_as_current: bool,
-    ) -> Result<(), PlayerError> {
+    ) -> Result<Option<QueuedTrackId>, PlayerError> {
         let current_index = self.current_track_index.load(Ordering::Acquire);
 
-        let new_current_index =
+        let (new_current_index, first_id) =
             self.tracks
                 .insert_tracks(current_index, position, tracks, set_as_current)?;
 
@@ -477,7 +477,7 @@ impl Player {
             self.queue_current_track(false).await;
         }
 
-        Ok(())
+        Ok(first_id)
     }
 
     pub async fn run(&self) -> Result<(), PlayerError> {

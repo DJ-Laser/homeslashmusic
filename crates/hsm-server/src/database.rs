@@ -20,6 +20,7 @@ mod sources;
 mod store;
 
 pub use sources::TrackLocation;
+pub use store::run_search;
 
 #[derive(Debug)]
 struct MusicDatabase {

@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{fmt::Display, time::Duration};
 
 use serde::{Deserialize, Serialize};
 use slotmap::DenseSlotMap;
@@ -9,6 +9,12 @@ use crate::database::store::{
 
 slotmap::new_key_type! {
     pub struct SongId;
+}
+
+impl Display for SongId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.0)
+    }
 }
 
 #[derive(Debug, Clone, Default)]

@@ -1,4 +1,8 @@
-use std::{mem, time::Duration};
+use std::{
+    fmt::{Debug, Display},
+    mem,
+    time::Duration,
+};
 
 use serde::{Deserialize, Serialize};
 use slotmap::DenseSlotMap;
@@ -13,6 +17,12 @@ use crate::database::{
 
 slotmap::new_key_type! {
     pub struct TrackId;
+}
+
+impl Display for TrackId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.0)
+    }
 }
 
 #[derive(Debug, Clone, Default)]

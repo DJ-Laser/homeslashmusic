@@ -1,4 +1,4 @@
-use std::mem;
+use std::{fmt::Display, mem};
 
 use serde::{Deserialize, Serialize};
 use slotmap::DenseSlotMap;
@@ -14,6 +14,12 @@ slotmap::new_key_type! {
     pub struct TrackGroupId;
 }
 
+impl Display for TrackGroupId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.0)
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct DerivedTrackGroupData {
     pub(super) tracks: Vec<TrackId>,
@@ -21,7 +27,7 @@ pub struct DerivedTrackGroupData {
 
 impl DerivedTrackGroupData {
     /// Tracks in this track group
-    pub fn songs(&self) -> &Vec<TrackId> {
+    pub fn tracks(&self) -> &Vec<TrackId> {
         &self.tracks
     }
 

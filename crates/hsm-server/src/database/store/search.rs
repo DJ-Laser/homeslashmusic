@@ -1,7 +1,10 @@
 use std::collections::HashSet;
 
-use crate::database::store::{
-    AlbumId, ArtistId, DatabaseStore, MissingDatabaseId, SongId, TrackGroupId, TrackId,
+use nucleo_matcher::{Matcher, Utf32String, pattern::Pattern};
+
+use crate::database::{
+    jobs::JobContext,
+    store::{AlbumId, ArtistId, DatabaseStore, MissingDatabaseId, SongId, TrackGroupId, TrackId},
 };
 
 pub enum SearchableEntityId {
@@ -15,7 +18,7 @@ pub enum SearchableEntityId {
 impl DatabaseStore {
     pub fn get_artists_text(
         &self,
-        artists_text: &Option<String>,
+        artists_text: Option<&String>,
         artists: &Vec<ArtistId>,
     ) -> Result<Option<String>, MissingDatabaseId> {
         if let Some(artists_text) = artists_text {
@@ -43,12 +46,12 @@ impl DatabaseStore {
     fn search_string(
         &self,
         title: &String,
-        artists_text: &Option<String>,
+        artists_text: Option<&String>,
         artists: &Vec<ArtistId>,
-    ) -> Result<String, MissingDatabaseId> {
+    ) -> Result<Utf32String, MissingDatabaseId> {
         let search_string = match self.get_artists_text(artists_text, artists)? {
-            None => title.clone(),
-            Some(artist) => format!("{} - {}", title, artist),
+            None => Utf32String::from(title.as_str()),
+            Some(artist) => Utf32String::from(format!("{title} - {artist}")),
         };
 
         Ok(search_string)
@@ -56,7 +59,7 @@ impl DatabaseStore {
 
     fn get_track_or_song_ids(
         &self,
-    ) -> Result<Vec<(SearchableEntityId, String)>, MissingDatabaseId> {
+    ) -> Result<Vec<(SearchableEntityId, Utf32String)>, MissingDatabaseId> {
         let mut songs = HashSet::new();
         let mut items = Vec::new();
 
@@ -67,13 +70,13 @@ impl DatabaseStore {
                 if songs.insert(song_id) {
                     items.push((
                         SearchableEntityId::Song(song_id),
-                        self.search_string(&song.title, &song.artists_text, &song.artists)?,
+                        self.search_string(&song.title, song.artists_text.as_ref(), &song.artists)?,
                     ));
                 }
             } else {
                 items.push((
                     SearchableEntityId::Track(track_id),
-                    self.search_string(&track.title, &track.artists_text, &track.artists)?,
+                    self.search_string(&track.title, track.artists_text.as_ref(), &track.artists)?,
                 ));
             }
         }
@@ -83,7 +86,7 @@ impl DatabaseStore {
 
     fn get_track_group_or_album_ids(
         &self,
-    ) -> Result<Vec<(SearchableEntityId, String)>, MissingDatabaseId> {
+    ) -> Result<Vec<(SearchableEntityId, Utf32String)>, MissingDatabaseId> {
         let mut albums = HashSet::new();
         let mut items = Vec::new();
 
@@ -94,7 +97,11 @@ impl DatabaseStore {
                 if albums.insert(album_id) {
                     items.push((
                         SearchableEntityId::Album(album_id),
-                        self.search_string(&album.title, &album.artists_text, &album.artists)?,
+                        self.search_string(
+                            &album.title,
+                            album.artists_text.as_ref(),
+                            &album.artists,
+                        )?,
                     ));
                 }
             } else {
@@ -102,7 +109,7 @@ impl DatabaseStore {
                     SearchableEntityId::TrackGroup(track_group_id),
                     self.search_string(
                         &track_group.title,
-                        &track_group.artists_text,
+                        track_group.artists_text.as_ref(),
                         &track_group.artists,
                     )?,
                 ));
@@ -115,15 +122,48 @@ impl DatabaseStore {
     /// Get all searchable entities and their search string
     pub fn get_searchable_entities(
         &self,
-    ) -> Result<Vec<(SearchableEntityId, String)>, MissingDatabaseId> {
+    ) -> Result<Vec<(SearchableEntityId, Utf32String)>, MissingDatabaseId> {
         let mut items: Vec<_> = self
             .artists
             .iter()
-            .map(|(artist_id, artist)| (SearchableEntityId::Artist(artist_id), artist.name.clone()))
+            .map(|(artist_id, artist)| {
+                (
+                    SearchableEntityId::Artist(artist_id),
+                    Utf32String::from(artist.name.as_str()),
+                )
+            })
             .collect();
         items.extend(self.get_track_or_song_ids()?);
         items.extend(self.get_track_group_or_album_ids()?);
 
         Ok(items)
     }
+}
+
+pub async fn run_search(
+    ctx: JobContext,
+    search_query: String,
+) -> Result<Option<SearchableEntityId>, MissingDatabaseId> {
+    use nucleo_matcher::pattern::{AtomKind, CaseMatching, Normalization};
+
+    let mut matcher = Matcher::new(nucleo_matcher::Config::DEFAULT);
+    let pattern = Pattern::new(
+        &search_query,
+        CaseMatching::Ignore,
+        Normalization::Smart,
+        AtomKind::Fuzzy,
+    );
+
+    let items = ctx.read_db(DatabaseStore::get_searchable_entities)?;
+
+    let top_result = smol::unblock(move || {
+        let scores = items
+            .into_iter()
+            .map(|(item, haystack)| (item, pattern.score(haystack.slice_u32(..), &mut matcher)));
+
+        scores.max_by_key(|item| item.1).map(|item| item.0)
+    })
+    .await;
+
+    Ok(top_result)
 }
