@@ -105,15 +105,10 @@ pub fn save_db_file(path: PathBuf, payload: &[u8]) -> Result<(), SaveDbError> {
     res
 }
 
-async fn save_db(handle: &Weak<MusicDatabase>, path: PathBuf) -> Result<(), SaveDbError> {
+pub async fn save_db(handle: &DatabaseHandle, path: PathBuf) -> Result<(), SaveDbError> {
     let crc = Crc::<u32>::new(&CRC_ALGORITHM);
 
-    let Some(handle) = handle.upgrade().map(DatabaseHandle) else {
-        return Ok(());
-    };
-
     let payload = handle.read_db(|db| postcard::to_allocvec_crc32(db, crc.digest()))?;
-    drop(handle);
 
     smol::unblock(move || save_db_file(path, &payload)).await
 }
@@ -155,6 +150,10 @@ async fn save_db_debounced(
                 Ok(true) => (),
             }
         }
+
+        let Some(handle) = handle.upgrade().map(DatabaseHandle) else {
+            break;
+        };
 
         if let Err(error) = save_db(&handle, save_path.clone()).await {
             error!("Error saving the database: {error}");

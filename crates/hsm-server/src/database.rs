@@ -12,16 +12,17 @@ use std::{
 };
 
 use directories::ProjectDirs;
-use log::info;
+use log::{error, info};
 use serde::{Deserialize, Serialize};
 use smol::{
     Executor, Task,
     channel::{self, Sender},
 };
+use thiserror::Error;
 
 use crate::database::{
     jobs::JobContext,
-    persistence::{AutosaveTask, load_db, start_autosave_task},
+    persistence::{AutosaveTask, SaveDbError, load_db, save_db, start_autosave_task},
     store::{DatabaseStore, fetch_incomplete_mbids},
 };
 
@@ -44,6 +45,12 @@ impl Default for DatabaseConfig {
 
         Self { path: default_path }
     }
+}
+
+#[derive(Debug, Error)]
+pub enum ReloadConfigError {
+    #[error(transparent)]
+    SaveDb(#[from] SaveDbError),
 }
 
 #[derive(Debug)]
@@ -101,13 +108,26 @@ impl DatabaseHandle {
         &self,
         executor: &Arc<Executor<'static>>,
         new_config: DatabaseConfig,
-    ) {
+    ) -> Result<(), ReloadConfigError> {
         let old_config = {
             let mut guard = self.0.config.write().unwrap();
             mem::replace(&mut *guard, new_config.clone())
         };
 
         if new_config.path != old_config.path {
+            match save_db(self, new_config.path.clone()).await {
+                Ok(()) => {}
+                Err(error) => {
+                    // Roll back path if the database fails to save
+                    error!(
+                        "Failed to save database to {}. Using old path",
+                        new_config.path.display()
+                    );
+                    self.0.config.write().unwrap().path = old_config.path;
+                    return Err(error.into());
+                }
+            }
+
             let new_autosaver =
                 start_autosave_task(executor, Arc::downgrade(&self.0), new_config.path);
 
@@ -119,6 +139,8 @@ impl DatabaseHandle {
             old_autosaver.stop().await;
             let _ = smol::fs::remove_file(&old_config.path).await;
         }
+
+        Ok(())
     }
 }
 
