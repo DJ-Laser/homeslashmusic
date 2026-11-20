@@ -2,6 +2,8 @@
 
 ### MusicBrainz enabled music database
 
+This project was previously shipped for Hack Club shipwrecked, as a minimal music player that only supported loading local files without a database. For Terra, I'm reworking the majority of it's internals to support a rich metadata database and customization via config files.
+
 **Note: This program is linux-only due to using both unix sockets and the MPRIS d-bus interface. If you are on windows, this program will not compile, and I will not be fixing that.**
 
 ## Database Structure
