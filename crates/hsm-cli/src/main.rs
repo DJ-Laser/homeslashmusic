@@ -2,7 +2,7 @@ mod cli;
 mod commands;
 mod ipc;
 
-use std::io;
+use std::{io, path::PathBuf};
 
 use clap::Parser;
 use thiserror::Error;
@@ -13,7 +13,7 @@ use commands::handle_command;
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("Could not connect to socket {path}")]
-    FailedToConnectToSocket { path: String, source: io::Error },
+    FailedToConnectToSocket { path: PathBuf, source: io::Error },
 
     #[error("Error communicating with server")]
     StreamReadWrite(#[source] io::Error),

@@ -1,7 +1,12 @@
 mod api;
 
+use directories::ProjectDirs;
 use git_version::git_version;
-use std::{env, sync::OnceLock};
+use std::{
+    env,
+    path::{Path, PathBuf},
+    sync::OnceLock,
+};
 
 pub use api::*;
 
@@ -26,20 +31,22 @@ pub fn version() -> Version {
     }
 }
 
-fn read_socket_path() -> String {
-    let runtime_path = env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| {
-        let uid = rustix::process::getuid();
-        format!("/run/user/{}", uid.as_raw())
-    });
+fn read_socket_path() -> PathBuf {
+    let runtime_path = ProjectDirs::from("", "", "homeslashmusic")
+        .and_then(|dirs| dirs.runtime_dir().map(PathBuf::from))
+        .unwrap_or_else(|| {
+            let uid = rustix::process::getuid();
+            PathBuf::from(format!("/run/user/{}/homeslashmusic", uid.as_raw()))
+        });
 
     if cfg!(debug_assertions) {
-        format!("{runtime_path}/homeslashmusic-debug.sock")
+        runtime_path.join("homeslashmusic-debug.sock")
     } else {
-        format!("{runtime_path}/homeslashmusic.sock")
+        runtime_path.join("homeslashmusic.sock")
     }
 }
 
-pub fn socket_path() -> &'static str {
-    static PATH: OnceLock<String> = OnceLock::new();
+pub fn socket_path() -> &'static Path {
+    static PATH: OnceLock<PathBuf> = OnceLock::new();
     PATH.get_or_init(read_socket_path)
 }

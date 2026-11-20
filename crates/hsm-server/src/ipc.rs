@@ -52,6 +52,10 @@ pub async fn run_ipc_server(handle: AppHandle) -> Result<(), IpcServerError> {
         return Err(IpcServerError::SocketInUse);
     }
 
+    if let Some(parent) = socket_path.parent() {
+        fs::create_dir_all(parent).map_err(IpcServerError::FailedToCreateSocket)?;
+    }
+
     let listener = DropGuard::new(
         UnixListener::bind(&socket_path).map_err(IpcServerError::FailedToCreateSocket)?,
         |_| cleanup_socket(&socket_path),

@@ -84,7 +84,7 @@ pub struct DatabaseStore {
 }
 
 impl DatabaseStore {
-    pub fn rebuild_derrived(&mut self) {
+    pub fn rebuild_derived(&mut self) {
         self.lookup.clear();
 
         for (_, song) in &mut self.songs {

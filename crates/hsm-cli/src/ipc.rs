@@ -15,7 +15,7 @@ pub fn send_request<R: Request>(request: R) -> Result<R::Response, crate::Error>
     let socket_path = hsm_ipc::socket_path();
     let mut stream = UnixStream::connect(socket_path).map_err(|source| {
         crate::Error::FailedToConnectToSocket {
-            path: socket_path.into(),
+            path: socket_path.to_owned(),
             source,
         }
     })?;

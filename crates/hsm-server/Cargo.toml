@@ -8,16 +8,20 @@ hsm-ipc.workspace = true
 
 rand.workspace = true
 uuid.workspace = true
-serde.workspace = true
 dashmap.workspace = true
 slotmap.workspace = true
 arc-swap.workspace = true
 float-cmp.workspace = true
 thiserror.workspace = true
+directories.workspace = true
 nucleo-matcher.workspace = true
 
 log.workspace = true
 env_logger.workspace = true
+
+crc.workspace = true
+serde.workspace = true
+postcard.workspace = true
 
 smol.workspace = true
 async-signal.workspace = true

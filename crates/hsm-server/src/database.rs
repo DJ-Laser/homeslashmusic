@@ -1,10 +1,19 @@
+mod jobs;
+mod persistence;
+mod sources;
+mod store;
+
 use std::{
     io::Write as _,
+    mem,
     path::PathBuf,
     sync::{Arc, RwLock},
     time::Duration,
 };
 
+use directories::ProjectDirs;
+use log::info;
+use serde::{Deserialize, Serialize};
 use smol::{
     Executor, Task,
     channel::{self, Sender},
@@ -12,20 +21,37 @@ use smol::{
 
 use crate::database::{
     jobs::JobContext,
+    persistence::{AutosaveTask, load_db, start_autosave_task},
     store::{DatabaseStore, fetch_incomplete_mbids},
 };
 
-mod jobs;
-mod sources;
-mod store;
-
+pub use persistence::LoadDbError;
 pub use sources::TrackLocation;
 pub use store::run_search;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DatabaseConfig {
+    pub path: PathBuf,
+}
+
+impl Default for DatabaseConfig {
+    fn default() -> Self {
+        let default_path = ProjectDirs::from("", "", "homeslashmusic").map_or_else(
+            || PathBuf::from("./homeslashmusic.db"),
+            |dirs| dirs.data_local_dir().join("homeslashmusic.db"),
+        );
+
+        Self { path: default_path }
+    }
+}
+
 #[derive(Debug)]
 struct MusicDatabase {
+    config: RwLock<DatabaseConfig>,
     db: RwLock<DatabaseStore>,
     mbid_wake_tx: Sender<()>,
+    autosaver: RwLock<AutosaveTask>,
 }
 
 #[derive(Debug, Clone)]
@@ -49,6 +75,9 @@ impl DatabaseHandle {
     {
         let db = &mut self.0.db.write().unwrap();
         let ret = f(db);
+
+        self.0.autosaver.read().unwrap().wake();
+
         if db.has_incomplete_mbids() {
             let _ = self.0.mbid_wake_tx.try_send(());
         }
@@ -67,13 +96,47 @@ impl DatabaseHandle {
     {
         executor.spawn(job(self.ctx(executor.clone())))
     }
+
+    pub async fn reload_config(
+        &self,
+        executor: &Arc<Executor<'static>>,
+        new_config: DatabaseConfig,
+    ) {
+        let old_config = {
+            let mut guard = self.0.config.write().unwrap();
+            mem::replace(&mut *guard, new_config.clone())
+        };
+
+        if new_config.path != old_config.path {
+            let new_autosaver =
+                start_autosave_task(executor, Arc::downgrade(&self.0), new_config.path);
+
+            let old_autosaver = {
+                let mut guard = self.0.autosaver.write().unwrap();
+                mem::replace(&mut *guard, new_autosaver)
+            };
+
+            old_autosaver.stop().await;
+            let _ = smol::fs::remove_file(&old_config.path).await;
+        }
+    }
 }
 
-fn start_database(executor: &Arc<Executor<'static>>, store: DatabaseStore) -> DatabaseHandle {
+fn start_database(
+    executor: &Arc<Executor<'static>>,
+    store: DatabaseStore,
+    config: DatabaseConfig,
+) -> DatabaseHandle {
     let (mbid_wake_tx, mbid_wake_rx) = channel::bounded(1);
-    let handle = DatabaseHandle(Arc::new(MusicDatabase {
-        db: RwLock::new(store),
-        mbid_wake_tx,
+    let handle = DatabaseHandle(Arc::new_cyclic(|weak| {
+        let autosaver = start_autosave_task(executor, weak.clone(), config.path.clone());
+
+        MusicDatabase {
+            config: RwLock::new(config),
+            db: RwLock::new(store),
+            mbid_wake_tx,
+            autosaver: RwLock::new(autosaver),
+        }
     }));
 
     handle
@@ -83,8 +146,23 @@ fn start_database(executor: &Arc<Executor<'static>>, store: DatabaseStore) -> Da
     handle
 }
 
-pub fn init_blank_database(executor: &Arc<Executor<'static>>) -> DatabaseHandle {
-    start_database(executor, DatabaseStore::default())
+pub async fn load_or_init_database(
+    executor: &Arc<Executor<'static>>,
+    config: DatabaseConfig,
+) -> Result<DatabaseHandle, LoadDbError> {
+    let store = load_db(config.path.clone()).await?;
+
+    let handle = if let Some(mut store) = store {
+        store.rebuild_derived();
+        info!("Loaded database file from {}", config.path.display());
+        start_database(executor, store, config)
+    } else {
+        info!("Database file not found at {}", config.path.display());
+        info!("Initializing blank database at {}", config.path.display());
+        start_database(executor, DatabaseStore::default(), config)
+    };
+
+    Ok(handle)
 }
 
 pub async fn start_update(ctx: JobContext, path: PathBuf) {
