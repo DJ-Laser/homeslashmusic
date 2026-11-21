@@ -1,5 +1,8 @@
 use std::{
-    sync::{Arc, Mutex, MutexGuard},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU8, AtomicU32, AtomicU64, AtomicUsize, Ordering},
+    },
     time::Duration,
 };
 
@@ -13,79 +16,127 @@ use thiserror::Error;
 
 type SeekResult = Result<(), SeekError>;
 
-#[derive(Debug)]
-struct ControlsInner {
-    pub playback_state: PlaybackState,
-    pub loop_mode: LoopMode,
-    pub volume: f32,
-    pub to_skip: usize,
-    pub position: Duration,
-    pub seek_position: Option<(SeekPosition, async_oneshot::Sender<SeekResult>)>,
+const fn encode_playback_state(playback_state: PlaybackState) -> u8 {
+    match playback_state {
+        PlaybackState::Playing => 0,
+        PlaybackState::Paused => 1,
+        PlaybackState::Stopped => 2,
+    }
 }
 
+const fn decode_playback_state(val: u8) -> PlaybackState {
+    match val {
+        0 => PlaybackState::Playing,
+        1 => PlaybackState::Paused,
+        _ => PlaybackState::Stopped,
+    }
+}
+
+const fn encode_loop_mode(loop_mode: LoopMode) -> u8 {
+    match loop_mode {
+        LoopMode::None => 0,
+        LoopMode::Track => 1,
+        LoopMode::Playlist => 2,
+    }
+}
+
+const fn decode_loop_mode(val: u8) -> LoopMode {
+    match val {
+        0 => LoopMode::None,
+        1 => LoopMode::Track,
+        _ => LoopMode::Playlist,
+    }
+}
+
+type SeekRequest = (SeekPosition, async_oneshot::Sender<SeekResult>);
+
 #[derive(Debug)]
-pub struct Controls(Mutex<ControlsInner>);
+pub struct Controls {
+    pub playback_state: AtomicU8,
+    pub loop_mode: AtomicU8,
+    pub volume: AtomicU32,
+    pub to_skip: AtomicUsize,
+    pub position_nanos: AtomicU64,
+    pub seek_position: Mutex<Option<SeekRequest>>,
+}
 
 impl Controls {
     pub fn new() -> Self {
-        Self(Mutex::new(ControlsInner {
-            playback_state: PlaybackState::Stopped,
-            loop_mode: LoopMode::None,
-            to_skip: 0,
-            volume: 1.0,
-            position: Duration::ZERO,
-            seek_position: None,
-        }))
-    }
-
-    fn lock(&self) -> MutexGuard<'_, ControlsInner> {
-        self.0.lock().unwrap()
+        Self {
+            playback_state: AtomicU8::new(encode_playback_state(PlaybackState::Stopped)),
+            loop_mode: AtomicU8::new(encode_loop_mode(LoopMode::None)),
+            to_skip: AtomicUsize::new(0),
+            volume: AtomicU32::new(1.0f32.to_bits()),
+            position_nanos: AtomicU64::new(0),
+            seek_position: Mutex::new(None),
+        }
     }
 
     pub fn playback_state(&self) -> PlaybackState {
-        self.lock().playback_state
+        decode_playback_state(self.playback_state.load(Ordering::Acquire))
     }
 
     pub fn set_playback_state(&self, playback_state: PlaybackState) -> PlaybackState {
-        std::mem::replace(&mut self.lock().playback_state, playback_state)
+        decode_playback_state(
+            self.playback_state
+                .swap(encode_playback_state(playback_state), Ordering::AcqRel),
+        )
     }
 
     pub fn loop_mode(&self) -> LoopMode {
-        self.lock().loop_mode
+        decode_loop_mode(self.loop_mode.load(Ordering::Acquire))
     }
 
     pub fn set_loop_mode(&self, loop_mode: LoopMode) -> LoopMode {
-        std::mem::replace(&mut self.lock().loop_mode, loop_mode)
+        decode_loop_mode(
+            self.loop_mode
+                .swap(encode_loop_mode(loop_mode), Ordering::AcqRel),
+        )
     }
 
     pub fn skip_one(&self) {
-        self.lock().to_skip += 1;
+        self.to_skip.fetch_add(1, Ordering::AcqRel);
     }
 
     pub fn skip_current(&self) {
-        self.lock().to_skip = 1;
+        self.to_skip.store(1, Ordering::Release);
+    }
+
+    pub fn consume_skip(&self) -> bool {
+        self.to_skip
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_sub(1))
+            .is_ok()
     }
 
     pub fn volume(&self) -> f32 {
-        self.lock().volume
+        f32::from_bits(self.volume.load(Ordering::Acquire))
     }
 
     pub fn set_volume(&self, volume: f32) -> f32 {
-        std::mem::replace(&mut self.lock().volume, volume)
+        f32::from_bits(self.volume.swap(volume.to_bits(), Ordering::AcqRel))
     }
 
     pub fn position(&self) -> Duration {
-        self.lock().position
+        Duration::from_nanos(self.position_nanos.load(Ordering::Acquire))
+    }
+
+    pub fn set_position(&self, position: Duration) {
+        let nanos = u64::try_from(position.as_nanos()).unwrap_or(u64::MAX);
+        self.position_nanos.store(nanos, Ordering::Release);
     }
 
     pub fn reset_position(&self) {
-        self.lock().position = Duration::ZERO;
+        self.position_nanos.store(0, Ordering::Release);
     }
 
     pub fn seek(&self, seek_position: SeekPosition) -> async_oneshot::Receiver<SeekResult> {
         let (tx, rx) = async_oneshot::oneshot();
-        self.lock().seek_position = Some((seek_position, tx));
+        *self.seek_position.lock().unwrap() = Some((seek_position, tx));
         rx
+    }
+
+    pub fn take_seek(&self) -> Option<SeekRequest> {
+        self.seek_position.try_lock().ok()?.take()
     }
 }
 
@@ -137,23 +188,22 @@ where
     }
 
     fn update_control_state(&mut self) {
-        let mut controls = self.controls.lock();
+        let controls = &self.controls;
 
-        self.cached_loop_mode = controls.loop_mode;
-        if controls.to_skip > 0 {
+        self.cached_loop_mode = controls.loop_mode();
+        if controls.consume_skip() {
             self.should_skip = true;
-            controls.to_skip -= 1;
             return;
         }
 
         let pausable = &mut self.input;
-        pausable.set_paused(matches!(controls.playback_state, PlaybackState::Paused));
+        pausable.set_paused(matches!(controls.playback_state(), PlaybackState::Paused));
 
         let volume_controlled = pausable.inner_mut();
-        volume_controlled.set_factor(controls.volume);
+        volume_controlled.set_factor(controls.volume());
 
         let position_tracked = volume_controlled.inner_mut();
-        if let Some((seek_position, mut tx)) = controls.seek_position.take() {
+        if let Some((seek_position, mut tx)) = controls.take_seek() {
             let current_position = position_tracked.get_pos();
             let seek_position = match seek_position {
                 SeekPosition::Forward(duration) => current_position.saturating_add(duration),
@@ -172,7 +222,7 @@ where
             let _ = tx.send(res);
         }
 
-        controls.position = position_tracked.get_pos();
+        controls.set_position(position_tracked.get_pos());
     }
 }
 
