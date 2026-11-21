@@ -26,9 +26,9 @@ pub enum IpcServerError {
     CheckSocketFileFailed(#[source] io::Error),
 
     #[error(
-        "The homeslashmusic socket file was already present, is another `hsm-server` instance running?"
+        "The homeslashmusic socket file was already present at {0}. is another `hsm-server` instance running?"
     )]
-    SocketInUse,
+    SocketInUse(PathBuf),
 
     #[error("Failed to create ipc socket: {0}")]
     FailedToCreateSocket(#[source] io::Error),
@@ -49,7 +49,7 @@ fn cleanup_socket(socket_path: &Path) {
 pub async fn run_ipc_server(handle: AppHandle) -> Result<(), IpcServerError> {
     let socket_path = PathBuf::from(hsm_ipc::socket_path());
     if is_socket_in_use(&socket_path)? {
-        return Err(IpcServerError::SocketInUse);
+        return Err(IpcServerError::SocketInUse(socket_path));
     }
 
     if let Some(parent) = socket_path.parent() {

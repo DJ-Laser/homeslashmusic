@@ -178,7 +178,7 @@ impl Player {
                 // If `use_queued` is false skip and load a new track
                 SourceQueueState::Playing => {
                     if !use_queued {
-                        self.controls.skip_one();
+                        self.controls.skip_current();
                     }
 
                     !use_queued
@@ -221,8 +221,8 @@ impl Player {
 
     pub async fn play(&self) {
         if self.is_stopped() {
-            let had_tracks = self.queue_current_track(true);
-            if !had_tracks.await {
+            let had_tracks = self.queue_current_track(false).await;
+            if !had_tracks {
                 return;
             }
         }

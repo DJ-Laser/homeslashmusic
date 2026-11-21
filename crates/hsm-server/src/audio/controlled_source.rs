@@ -62,6 +62,10 @@ impl Controls {
         self.lock().to_skip += 1;
     }
 
+    pub fn skip_current(&self) {
+        self.lock().to_skip = 1;
+    }
+
     pub fn volume(&self) -> f32 {
         self.lock().volume
     }
@@ -85,6 +89,7 @@ impl Controls {
     }
 }
 
+#[derive(Debug)]
 pub enum SourceEvent {
     Seeked(Duration),
     LoopError(RodioSeekError),
@@ -97,7 +102,7 @@ impl SourceEvent {
     /// If this event indicates that the soutrce has ended.
     /// Used to manage the player's internal source count
     pub fn indicates_end(&self) -> bool {
-        matches!(self, Self::Finished | Self::LoopError(_))
+        matches!(self, Self::Finished | Self::LoopError(_) | Self::Skipped)
     }
 }
 
@@ -112,6 +117,7 @@ struct ControlledSource<I> {
 
     should_skip: bool,
     cached_loop_mode: LoopMode,
+    ended: bool,
 }
 
 impl<I> ControlledSource<I>
@@ -126,6 +132,7 @@ where
 
             should_skip: false,
             cached_loop_mode: LoopMode::None,
+            ended: false,
         }
     }
 
@@ -140,7 +147,7 @@ where
         }
 
         let pausable = &mut self.input;
-        pausable.set_paused(!matches!(controls.playback_state, PlaybackState::Playing));
+        pausable.set_paused(matches!(controls.playback_state, PlaybackState::Paused));
 
         let volume_controlled = pausable.inner_mut();
         volume_controlled.set_factor(controls.volume);
@@ -154,13 +161,15 @@ where
                 SeekPosition::To(position) => position,
             };
 
-            let _ = tx.send(
-                position_tracked
-                    .try_seek(seek_position)
-                    .map_err(|error| SeekError::SeekFailed(error.to_string())),
-            );
+            let res = position_tracked
+                .try_seek(seek_position)
+                .map_err(|error| SeekError::SeekFailed(error.to_string()));
 
-            let _ = self.source_tx.try_send(SourceEvent::Seeked(seek_position));
+            if res.is_ok() {
+                let _ = self.source_tx.try_send(SourceEvent::Seeked(seek_position));
+            }
+
+            let _ = tx.send(res);
         }
 
         controls.position = position_tracked.get_pos();
@@ -175,8 +184,14 @@ where
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
+        if self.ended {
+            return None;
+        }
+
         if self.should_skip {
             let _ = self.source_tx.try_send(SourceEvent::Skipped);
+            self.ended = true;
+
             return None;
         }
 
@@ -184,18 +199,26 @@ where
             return Some(value);
         }
 
-        if matches!(self.cached_loop_mode, LoopMode::Track) {
+        let sample = if matches!(self.cached_loop_mode, LoopMode::Track) {
             if let Err(error) = self.input.try_seek(Duration::ZERO) {
                 let _ = self.source_tx.try_send(SourceEvent::LoopError(error));
+                self.ended = true;
+
                 return None;
             }
 
             let _ = self.source_tx.try_send(SourceEvent::Looped);
             self.input.next()
         } else {
-            let _ = self.source_tx.try_send(SourceEvent::Finished);
             None
+        };
+
+        if sample.is_none() {
+            let _ = self.source_tx.try_send(SourceEvent::Finished);
+            self.ended = true;
         }
+
+        sample
     }
 
     #[inline]
