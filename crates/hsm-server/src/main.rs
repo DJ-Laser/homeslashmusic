@@ -1,4 +1,5 @@
 mod audio;
+mod cli;
 mod config;
 mod database;
 mod ipc;
@@ -7,6 +8,7 @@ mod signals;
 
 use std::sync::Arc;
 
+use clap::Parser as _;
 use futures_concurrency::future::Race;
 use hsm_ipc::Event;
 use log::{error, info};
@@ -15,7 +17,8 @@ use thiserror::Error;
 
 use crate::{
     audio::{AudioServerError, Player, PlayerError, start_audio_server},
-    config::database::DatabaseConfig,
+    cli::{Cli, Command},
+    config::{config_file_path, parse_config_file},
     database::LoadDbError,
     signals::{SignalHandler, SignalHandlerError},
 };
@@ -39,7 +42,10 @@ pub enum MainError {
     Ipc(#[from] IpcServerError),
 
     #[error(transparent)]
-    LoadDataabse(#[from] LoadDbError),
+    LoadDatabse(#[from] LoadDbError),
+
+    #[error(transparent)]
+    ParseConfig(#[from] Box<kdl_config::KdlConfigError>),
 }
 
 #[derive(Debug, Clone)]
@@ -59,11 +65,14 @@ impl AppHandle {
 async fn run_servers(executor: Arc<Executor<'static>>) -> Result<(), MainError> {
     let mut signal_handler = SignalHandler::init()?;
 
+    let config_path = config_file_path()?;
+    let config = parse_config_file(config_path.clone()).await?;
+
     let (mut event_tx, event_rx) = async_broadcast::broadcast(128);
     event_tx.set_overflow(true);
 
     let player = start_audio_server(event_tx).await?;
-    let database = database::load_or_init_database(&executor, DatabaseConfig::default()).await?;
+    let database = database::load_or_init_database(&executor, config.database).await?;
 
     let handle = AppHandle {
         executor,
@@ -95,11 +104,23 @@ async fn run_servers(executor: Arc<Executor<'static>>) -> Result<(), MainError> 
 
 fn main() {
     env_logger::builder()
+        .filter_level(log::LevelFilter::Info)
         .filter_module("symphonia", log::LevelFilter::Warn)
         .init();
 
     let executor: Arc<Executor<'static>> = Arc::new(Executor::new());
-    match smol::block_on(executor.run(run_servers(executor.clone()))) {
+
+    let command = Cli::parse().command;
+
+    match smol::block_on(executor.run(async {
+        match command {
+            None => run_servers(executor.clone()).await,
+            Some(Command::Validate { path }) => {
+                parse_config_file(path).await?;
+                Ok(())
+            }
+        }
+    })) {
         Ok(()) => (),
         Err(error) => error!("{error}"),
     }

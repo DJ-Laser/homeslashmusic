@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 hsm-ipc.workspace = true
 
+clap.workspace = true
 rand.workspace = true
 uuid.workspace = true
 dashmap.workspace = true
@@ -38,6 +39,10 @@ governor.workspace = true
 urlencoding.workspace = true
 mpris-server.workspace = true
 musicbrainz_rs.workspace = true
+
+[build-dependencies]
+clap.workspace = true
+clap_complete.workspace = true
 
 [lints]
 workspace = true

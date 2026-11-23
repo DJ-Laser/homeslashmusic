@@ -4,27 +4,27 @@ use directories::ProjectDirs;
 use kdl_config::{KdlChoice, KdlNode};
 use log::warn;
 
-#[derive(Debug, Clone, KdlNode)]
+#[derive(Debug, Clone, PartialEq, Eq, KdlNode)]
 #[kdl(node = "local", rename_all = "kebab-case")]
 pub struct LocalSourceConfig {
     #[kdl(positional = 0)]
     pub path: PathBuf,
 }
 
-#[derive(Debug, Clone, KdlChoice)]
+#[derive(Debug, Clone, PartialEq, Eq, KdlChoice)]
 #[kdl(rename_all = "kebab-case")]
 pub enum SourceConfig {
     Local(LocalSourceConfig),
 }
 
-#[derive(Debug, Clone, KdlNode)]
+#[derive(Debug, Clone, PartialEq, Eq, KdlNode)]
 #[kdl(rename_all = "kebab-case")]
 pub struct ProviderConfig {
     #[kdl(children)]
     pub sources: Vec<SourceConfig>,
 }
 
-#[derive(Debug, Clone, KdlNode)]
+#[derive(Debug, Clone, PartialEq, Eq, KdlNode)]
 #[kdl(node = "database", rename_all = "kebab-case")]
 pub struct DatabaseConfig {
     #[kdl(value, default_fn = "default_database_path")]
@@ -36,13 +36,13 @@ pub struct DatabaseConfig {
 
 fn default_database_path() -> PathBuf {
     ProjectDirs::from("", "", "homeslashmusic").map_or_else(
-        || PathBuf::from("./homeslashmusic.db"),
-        |dirs| {
+        || {
             warn!(
                 "Home directory could not be determined. Placing database at ./homeslashmusic.db"
             );
-            dirs.data_local_dir().join("homeslashmusic.db")
+            PathBuf::from("./homeslashmusic.db")
         },
+        |dirs| dirs.data_local_dir().join("homeslashmusic.db"),
     )
 }
 

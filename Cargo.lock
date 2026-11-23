@@ -1158,6 +1158,8 @@ dependencies = [
  "async-broadcast",
  "async-oneshot",
  "async-signal",
+ "clap",
+ "clap_complete",
  "crc",
  "dashmap",
  "directories",
