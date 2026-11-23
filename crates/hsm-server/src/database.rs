@@ -11,41 +11,25 @@ use std::{
     time::Duration,
 };
 
-use directories::ProjectDirs;
 use log::{error, info};
-use serde::{Deserialize, Serialize};
 use smol::{
     Executor, Task,
     channel::{self, Sender},
 };
 use thiserror::Error;
 
-use crate::database::{
-    jobs::JobContext,
-    persistence::{AutosaveTask, SaveDbError, load_db, save_db, start_autosave_task},
-    store::{DatabaseStore, fetch_incomplete_mbids},
+use crate::{
+    config::database::DatabaseConfig,
+    database::{
+        jobs::JobContext,
+        persistence::{AutosaveTask, SaveDbError, load_db, save_db, start_autosave_task},
+        store::{DatabaseStore, fetch_incomplete_mbids},
+    },
 };
 
 pub use persistence::LoadDbError;
 pub use sources::TrackLocation;
 pub use store::run_search;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct DatabaseConfig {
-    pub path: PathBuf,
-}
-
-impl Default for DatabaseConfig {
-    fn default() -> Self {
-        let default_path = ProjectDirs::from("", "", "homeslashmusic").map_or_else(
-            || PathBuf::from("./homeslashmusic.db"),
-            |dirs| dirs.data_local_dir().join("homeslashmusic.db"),
-        );
-
-        Self { path: default_path }
-    }
-}
 
 #[derive(Debug, Error)]
 pub enum ReloadConfigError {

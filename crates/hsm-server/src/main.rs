@@ -1,4 +1,5 @@
 mod audio;
+mod config;
 mod database;
 mod ipc;
 mod mpris;
@@ -14,7 +15,8 @@ use thiserror::Error;
 
 use crate::{
     audio::{AudioServerError, Player, PlayerError, start_audio_server},
-    database::{DatabaseConfig, LoadDbError},
+    config::database::DatabaseConfig,
+    database::LoadDbError,
     signals::{SignalHandler, SignalHandlerError},
 };
 use crate::{database::DatabaseHandle, ipc::IpcServerError, mpris::MprisServerError};
