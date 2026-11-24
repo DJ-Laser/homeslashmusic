@@ -41,8 +41,7 @@ pub async fn update_source(ctx: JobContext, source: SourceConfig) {
 }
 
 pub async fn update_sources(ctx: JobContext) {
-    println!("Starting database update");
-    println!();
+    info!("Starting database update");
 
     let providers = ctx.read_config(|config| config.providers.clone());
 
