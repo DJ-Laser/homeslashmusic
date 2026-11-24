@@ -1,4 +1,4 @@
-use std::{path::PathBuf, time::Duration};
+use std::time::Duration;
 
 use crate::{
     InsertItem, InsertPosition, LoopMode, PlaybackState, QueuedTrack, QueuedTrackId, SearchResult,
@@ -72,7 +72,7 @@ define_requests! {
     // ##############
 
     /// Start a full database update
-    UpdateDatabase(PathBuf) -> ();
+    UpdateDatabase() -> ();
 
     /// Search the database for a query
     /// Returns database items and their relevance score

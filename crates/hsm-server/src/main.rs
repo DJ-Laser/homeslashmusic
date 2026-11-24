@@ -6,7 +6,7 @@ mod ipc;
 mod mpris;
 mod signals;
 
-use std::sync::Arc;
+use std::{process::ExitCode, sync::Arc};
 
 use clap::Parser as _;
 use futures_concurrency::future::Race;
@@ -72,7 +72,8 @@ async fn run_servers(executor: Arc<Executor<'static>>) -> Result<(), MainError> 
     event_tx.set_overflow(true);
 
     let player = start_audio_server(event_tx).await?;
-    let database = database::load_or_init_database(&executor, config.database).await?;
+    let (database, database_autosaver) =
+        database::load_or_init_database(&executor, config.database).await?;
 
     let handle = AppHandle {
         executor,
@@ -81,7 +82,7 @@ async fn run_servers(executor: Arc<Executor<'static>>) -> Result<(), MainError> 
         event_rx: event_rx.deactivate(),
     };
 
-    (
+    let res = (
         async { player.run().await.map_err(Into::into) },
         async {
             mpris::run_mpris_server(handle.clone())
@@ -99,10 +100,14 @@ async fn run_servers(executor: Arc<Executor<'static>>) -> Result<(), MainError> 
         },
     )
         .race()
-        .await
+        .await;
+
+    database_autosaver.stop().await;
+
+    res
 }
 
-fn main() {
+fn main() -> ExitCode {
     env_logger::builder()
         .filter_level(log::LevelFilter::Info)
         .filter_module("symphonia", log::LevelFilter::Warn)
@@ -112,7 +117,7 @@ fn main() {
 
     let command = Cli::parse().command;
 
-    match smol::block_on(executor.run(async {
+    let res = smol::block_on(executor.run(async {
         match command {
             None => run_servers(executor.clone()).await,
             Some(Command::Validate { path }) => {
@@ -120,10 +125,17 @@ fn main() {
                 Ok(())
             }
         }
-    })) {
-        Ok(()) => (),
-        Err(error) => error!("{error}"),
+    }));
+
+    if let Err(ref error) = res {
+        error!("{error}");
     }
 
     info!("hsm-server shutting down");
+
+    if res.is_ok() {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
 }

@@ -1,5 +1,3 @@
-use std::path;
-
 use crate::cli::{Cli, Command, QueueCommand, SearchQuery};
 use crate::ipc::send_request;
 use hsm_ipc::{InsertPosition, LoopMode, QueuedTrack, SeekOffset, requests};
@@ -125,9 +123,8 @@ pub fn handle_command(command: Cli) -> Result<(), crate::Error> {
             }
         }
 
-        Command::Update { path } => {
-            let absolute_path = path::absolute(path).map_err(crate::Error::AbsolutePathFailed)?;
-            send_request(requests::UpdateDatabase(absolute_path))?;
+        Command::Update => {
+            send_request(requests::UpdateDatabase)?;
         }
     }
 

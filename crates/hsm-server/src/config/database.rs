@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::{collections::HashMap, path::PathBuf, time::Duration};
 
 use directories::ProjectDirs;
 use kdl_config::{KdlChoice, KdlNode};
@@ -27,8 +27,14 @@ pub struct ProviderConfig {
 #[derive(Debug, Clone, PartialEq, Eq, KdlNode)]
 #[kdl(node = "database", rename_all = "kebab-case")]
 pub struct DatabaseConfig {
-    #[kdl(value, default_fn = "default_database_path")]
-    pub path: PathBuf,
+    #[kdl(value, name = "path", default_fn = "default_database_path")]
+    pub database_file_path: PathBuf,
+
+    #[kdl(value, from = "kdl_config::Duration")]
+    pub autosave_debounce: Duration,
+
+    #[kdl(value, from = "kdl_config::Duration")]
+    pub autosave_max_delay: Duration,
 
     #[kdl(path = "providers", registry, default)]
     pub providers: HashMap<String, ProviderConfig>,
@@ -49,7 +55,9 @@ fn default_database_path() -> PathBuf {
 impl Default for DatabaseConfig {
     fn default() -> Self {
         Self {
-            path: default_database_path(),
+            database_file_path: default_database_path(),
+            autosave_debounce: Duration::from_secs(5),
+            autosave_max_delay: Duration::from_secs(30),
             providers: HashMap::default(),
         }
     }

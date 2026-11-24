@@ -2,8 +2,8 @@ use std::{
     fs::{self, File},
     io::{self, Write},
     path::PathBuf,
-    sync::{Arc, Weak},
-    time::{Duration, Instant},
+    sync::Arc,
+    time::Instant,
 };
 
 use crc::Crc;
@@ -15,7 +15,7 @@ use smol::{
 };
 use thiserror::Error;
 
-use crate::database::{DatabaseHandle, MusicDatabase, store::DatabaseStore};
+use crate::database::{DatabaseHandle, store::DatabaseStore};
 
 const DB_MAGIC: &[u8; 5] = b"HSMDB";
 const DB_VERSION: u32 = 1;
@@ -113,18 +113,14 @@ pub async fn save_db(handle: &DatabaseHandle, path: PathBuf) -> Result<(), SaveD
     smol::unblock(move || save_db_file(path, &payload)).await
 }
 
-async fn save_db_debounced(
-    handle: Weak<MusicDatabase>,
-    waker: channel::Receiver<()>,
-    save_path: PathBuf,
-) {
-    let debounce_delay = Duration::from_secs(5);
-    let max_delay = Duration::from_secs(30);
-
+async fn save_db_debounced(handle: DatabaseHandle, waker: channel::Receiver<()>) {
     loop {
         if waker.recv().await.is_err() {
             break;
         }
+
+        let (debounce_delay, max_delay) =
+            handle.read_config(|config| (config.autosave_debounce, config.autosave_max_delay));
 
         let first_dirty_at = Instant::now();
 
@@ -144,16 +140,13 @@ async fn save_db_debounced(
                 .await;
 
             // If no write happened, or the channel was dropped, save the file
-            // If the channel was dropped, don't save
             match write_occurred {
                 Ok(false) | Err(_) => break,
                 Ok(true) => (),
             }
         }
 
-        let Some(handle) = handle.upgrade().map(DatabaseHandle) else {
-            break;
-        };
+        let save_path = handle.read_config(|config| config.database_file_path.clone());
 
         if let Err(error) = save_db(&handle, save_path.clone()).await {
             error!("Error saving the database: {error}");
@@ -170,26 +163,22 @@ pub struct AutosaveTask {
 }
 
 impl AutosaveTask {
-    pub fn wake(&self) {
-        let _ = self.wake_tx.try_send(());
-    }
-
     pub async fn stop(self) {
         let Self { wake_tx, task } = self;
-        drop(wake_tx);
+        wake_tx.close();
         task.await;
     }
 }
 
 pub fn start_autosave_task(
     executor: &Arc<Executor<'static>>,
-    handle: Weak<MusicDatabase>,
-    save_path: PathBuf,
+    handle: DatabaseHandle,
+    channel: (channel::Sender<()>, channel::Receiver<()>),
 ) -> AutosaveTask {
-    let (wake_tx, wake_rx) = channel::bounded(1);
-    let task = executor.spawn(save_db_debounced(handle, wake_rx, save_path));
+    let task = executor.spawn(save_db_debounced(handle, channel.1));
 
-    let _ = wake_tx.try_send(());
-
-    AutosaveTask { wake_tx, task }
+    AutosaveTask {
+        wake_tx: channel.0,
+        task,
+    }
 }

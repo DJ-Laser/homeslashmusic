@@ -4,17 +4,14 @@ mod sources;
 mod store;
 
 use std::{
-    io::Write as _,
     mem,
-    path::PathBuf,
     sync::{Arc, RwLock},
-    time::Duration,
 };
 
-use log::{error, info};
+use log::{error, info, warn};
 use smol::{
     Executor, Task,
-    channel::{self, Sender},
+    channel::{self},
 };
 use thiserror::Error;
 
@@ -38,11 +35,17 @@ pub enum ReloadConfigError {
 }
 
 #[derive(Debug)]
+
+struct DatabaseState {
+    config: DatabaseConfig,
+    store: DatabaseStore,
+}
+
+#[derive(Debug)]
 struct MusicDatabase {
-    config: RwLock<DatabaseConfig>,
-    db: RwLock<DatabaseStore>,
-    mbid_wake_tx: Sender<()>,
-    autosaver: RwLock<AutosaveTask>,
+    state: RwLock<DatabaseState>,
+    mbid_wake_tx: channel::Sender<()>,
+    autosave_wake_tx: channel::Sender<()>,
 }
 
 #[derive(Debug, Clone)]
@@ -53,23 +56,30 @@ impl DatabaseHandle {
         JobContext::new(executor, self.clone())
     }
 
+    fn read_config<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&DatabaseConfig) -> R,
+    {
+        f(&self.0.state.read().unwrap().config)
+    }
+
     pub fn read_db<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&DatabaseStore) -> R,
     {
-        f(&self.0.db.read().unwrap())
+        f(&self.0.state.read().unwrap().store)
     }
 
-    fn write_db<F, R>(&self, f: F) -> R
+    fn write_state<F, R>(&self, f: F) -> R
     where
-        F: FnOnce(&mut DatabaseStore) -> R,
+        F: FnOnce(&mut DatabaseState) -> R,
     {
-        let db = &mut self.0.db.write().unwrap();
-        let ret = f(db);
+        let state = &mut self.0.state.write().unwrap();
+        let ret = f(state);
 
-        self.0.autosaver.read().unwrap().wake();
+        let _ = self.0.autosave_wake_tx.try_send(());
 
-        if db.has_incomplete_mbids() {
+        if state.store.has_incomplete_mbids() {
             let _ = self.0.mbid_wake_tx.try_send(());
         }
 
@@ -88,43 +98,40 @@ impl DatabaseHandle {
         executor.spawn(job(self.ctx(executor.clone())))
     }
 
-    pub async fn reload_config(
-        &self,
-        executor: &Arc<Executor<'static>>,
-        new_config: DatabaseConfig,
-    ) -> Result<(), ReloadConfigError> {
+    pub async fn reload_config(&self, new_config: DatabaseConfig) -> Result<(), ReloadConfigError> {
         let old_config = {
-            let mut guard = self.0.config.write().unwrap();
-            mem::replace(&mut *guard, new_config.clone())
+            let mut state = self.0.state.write().unwrap();
+            mem::replace(&mut state.config, new_config.clone())
         };
 
-        if new_config.path != old_config.path {
-            match save_db(self, new_config.path.clone()).await {
+        if new_config.database_file_path != old_config.database_file_path {
+            match save_db(self, new_config.database_file_path.clone()).await {
                 Ok(()) => {}
                 Err(error) => {
                     // Roll back path if the database fails to save
                     error!(
-                        "Failed to save database to {}. Using old path",
-                        new_config.path.display()
+                        "Failed to save database to {}: {error}. Using old path",
+                        new_config.database_file_path.display()
                     );
-                    self.0.config.write().unwrap().path = old_config.path;
+                    self.0.state.write().unwrap().config.database_file_path =
+                        old_config.database_file_path;
                     return Err(error.into());
                 }
             }
 
-            let new_autosaver =
-                start_autosave_task(executor, Arc::downgrade(&self.0), new_config.path);
-
-            let old_autosaver = {
-                let mut guard = self.0.autosaver.write().unwrap();
-                mem::replace(&mut *guard, new_autosaver)
-            };
-
-            old_autosaver.stop().await;
-            let _ = smol::fs::remove_file(&old_config.path).await;
+            if let Err(error) = smol::fs::remove_file(&old_config.database_file_path).await {
+                warn!(
+                    "Failed to remove old databse file at {}: {error}",
+                    old_config.database_file_path.display()
+                );
+            }
         }
 
         Ok(())
+    }
+
+    pub fn update(&self, executor: &Arc<Executor<'static>>) -> Task<()> {
+        self.run_job(executor, sources::update_sources)
     }
 }
 
@@ -132,70 +139,53 @@ fn start_database(
     executor: &Arc<Executor<'static>>,
     store: DatabaseStore,
     config: DatabaseConfig,
-) -> DatabaseHandle {
+) -> (DatabaseHandle, AutosaveTask) {
     let (mbid_wake_tx, mbid_wake_rx) = channel::bounded(1);
-    let handle = DatabaseHandle(Arc::new_cyclic(|weak| {
-        let autosaver = start_autosave_task(executor, weak.clone(), config.path.clone());
+    let (autosave_wake_tx, autosave_wake_rx) = channel::bounded(1);
 
-        MusicDatabase {
-            config: RwLock::new(config),
-            db: RwLock::new(store),
-            mbid_wake_tx,
-            autosaver: RwLock::new(autosaver),
-        }
+    let handle = DatabaseHandle(Arc::new(MusicDatabase {
+        state: RwLock::new(DatabaseState { config, store }),
+        mbid_wake_tx,
+        autosave_wake_tx: autosave_wake_tx.clone(),
     }));
 
     handle
         .run_job(executor, |ctx| fetch_incomplete_mbids(ctx, mbid_wake_rx))
         .detach();
 
-    handle
+    let autosaver = start_autosave_task(
+        executor,
+        handle.clone(),
+        (autosave_wake_tx, autosave_wake_rx),
+    );
+
+    (handle, autosaver)
 }
 
 pub async fn load_or_init_database(
     executor: &Arc<Executor<'static>>,
     config: DatabaseConfig,
-) -> Result<DatabaseHandle, LoadDbError> {
-    let store = load_db(config.path.clone()).await?;
+) -> Result<(DatabaseHandle, AutosaveTask), LoadDbError> {
+    let store = load_db(config.database_file_path.clone()).await?;
 
     let handle = if let Some(mut store) = store {
         store.rebuild_derived();
-        info!("Loaded database file from {}", config.path.display());
+        info!(
+            "Loaded database file from {}",
+            config.database_file_path.display()
+        );
         start_database(executor, store, config)
     } else {
-        info!("Database file not found at {}", config.path.display());
-        info!("Initializing blank database at {}", config.path.display());
+        info!(
+            "Database file not found at {}",
+            config.database_file_path.display()
+        );
+        info!(
+            "Initializing blank database at {}",
+            config.database_file_path.display()
+        );
         start_database(executor, DatabaseStore::default(), config)
     };
 
     Ok(handle)
-}
-
-pub async fn start_update(ctx: JobContext, path: PathBuf) {
-    println!("Starting database update");
-    println!();
-
-    print!("Loading local files...");
-    let _ = std::io::stdout().flush();
-    sources::local_files::load_all_from_path(ctx.clone(), path).await;
-    println!("Done!");
-
-    ctx.read_db(DatabaseStore::print_contents);
-
-    print!("Waiting for api requests");
-    let _ = std::io::stdout().flush();
-
-    loop {
-        smol::Timer::after(Duration::from_secs(1)).await;
-        print!(".");
-        let _ = std::io::stdout().flush();
-
-        if ctx.read_db(|db| !db.has_incomplete_mbids()) {
-            break;
-        }
-    }
-
-    println!("Done!");
-
-    ctx.read_db(DatabaseStore::print_contents);
 }

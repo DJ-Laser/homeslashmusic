@@ -325,11 +325,9 @@ impl RequestHandler for AppHandle {
 
     async fn handle_update_database(
         &self,
-        request: requests::UpdateDatabase,
+        _request: requests::UpdateDatabase,
     ) -> Result<(), hsm_ipc::Error> {
-        self.database
-            .run_job(&self.executor, |ctx| database::start_update(ctx, request.0))
-            .detach();
+        self.database.update(&self.executor).detach();
 
         Ok(())
     }

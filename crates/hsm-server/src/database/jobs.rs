@@ -2,7 +2,10 @@ use std::sync::Arc;
 
 use smol::Executor;
 
-use crate::database::{DatabaseHandle, store::DatabaseStore};
+use crate::{
+    config::database::DatabaseConfig,
+    database::{DatabaseHandle, store::DatabaseStore},
+};
 
 #[derive(Debug, Clone)]
 pub struct JobContext {
@@ -15,8 +18,7 @@ impl JobContext {
         Self { executor, handle }
     }
 
-    /// Spawn a new job that runs in parallel to the current job.
-    /// Once the job completes the commit phase, the furure will finish.
+    /// Spawn a new task that runs in parallel to the current task.
     /// Dropping this future will cancel it.
     pub fn spawn<F>(&self, fut: F) -> impl Future<Output = F::Output>
     where
@@ -34,11 +36,19 @@ impl JobContext {
         self.handle.read_db(f)
     }
 
+    /// Synchronously read from the database
+    pub fn read_config<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&DatabaseConfig) -> R,
+    {
+        self.handle.read_config(|config| f(config))
+    }
+
     /// Synchronously write to the database
     pub fn write_db<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&mut DatabaseStore) -> R,
     {
-        self.handle.write_db(f)
+        self.handle.write_state(|state| f(&mut state.store))
     }
 }

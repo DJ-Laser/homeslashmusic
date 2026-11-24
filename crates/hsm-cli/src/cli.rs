@@ -1,4 +1,4 @@
-use std::{num::ParseFloatError, path::PathBuf, time::Duration};
+use std::{num::ParseFloatError, time::Duration};
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use hsm_ipc::SeekPosition;
@@ -52,9 +52,7 @@ pub enum Command {
         query: Option<SearchQuery>,
     },
 
-    Update {
-        path: PathBuf,
-    },
+    Update,
 }
 
 #[derive(Debug, Subcommand)]
