@@ -82,6 +82,6 @@ pub fn config_file_path() -> Result<PathBuf, Box<KdlConfigError>> {
 #[kdl(node = "config", rename_all = "kebab-case")]
 #[derive(Default)]
 pub struct HsmServerConfig {
-    #[kdl(default)]
+    #[kdl(child, default)]
     pub database: DatabaseConfig,
 }

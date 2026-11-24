@@ -120,7 +120,7 @@ async fn save_db_debounced(handle: DatabaseHandle, waker: channel::Receiver<()>)
         }
 
         let (debounce_delay, max_delay) =
-            handle.read_config(|config| (config.autosave_debounce, config.autosave_max_delay));
+            handle.read_config(|config| (config.autosave_debounce(), config.autosave_max_delay()));
 
         let first_dirty_at = Instant::now();
 
