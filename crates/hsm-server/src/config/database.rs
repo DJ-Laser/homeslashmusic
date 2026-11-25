@@ -40,7 +40,7 @@ pub enum SourceConfig {
 #[derive(Debug, Clone, PartialEq, Eq, KdlNode)]
 #[kdl(rename_all = "kebab-case")]
 pub struct ProviderConfig {
-    #[kdl(children)]
+    #[kdl(children_any)]
     pub sources: Vec<SourceConfig>,
 }
 
@@ -56,7 +56,7 @@ pub struct DatabaseConfig {
     #[kdl(value, default_fn = "default_autosave_max_delay")]
     autosave_max_delay: kdl_config::Duration,
 
-    #[kdl(registry, path = "providers", default)]
+    #[kdl(registry, name = "provider", select(arg(0), consume), default)]
     pub providers: HashMap<String, ProviderConfig>,
 }
 
