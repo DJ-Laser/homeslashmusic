@@ -25,6 +25,18 @@ impl Display for TrackId {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReplayGain {
+    /// Single track gain in decibels
+    pub track_gain: Option<f32>,
+    /// Single track amplitude in linear 0..1
+    pub track_peak: Option<f32>,
+    /// Full album gain in decibels
+    pub album_gain: Option<f32>,
+    /// Full album amplitude in linear 0..1
+    pub album_peak: Option<f32>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct DerivedTrackData {}
 
@@ -52,6 +64,8 @@ pub struct TrackData {
     pub artists: Vec<ArtistId>,
     /// The string representation of the track's artists. May include separators like "feat."
     pub artists_text: Option<String>,
+
+    pub replay_gain: ReplayGain,
 }
 
 impl DatabaseStore {

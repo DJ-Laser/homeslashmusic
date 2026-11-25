@@ -13,7 +13,8 @@ use crate::database::{
     store::{
         AlbumData, AlbumId, ArtistData, ArtistId, DerivedAlbumData, DerivedArtistData,
         DerivedSongData, DerivedTrackData, DerivedTrackGroupData, MbidQueryType, MissingDatabaseId,
-        MusicBrainzId, SongData, SongId, TrackData, TrackGroupData, TrackGroupId, TrackId,
+        MusicBrainzId, ReplayGain, SongData, SongId, TrackData, TrackGroupData, TrackGroupId,
+        TrackId,
     },
 };
 
@@ -262,7 +263,52 @@ fn get_track_group(ctx: &JobContext, tag: &Tag) -> Option<TrackGroupId> {
     Some(album)
 }
 
-async fn load_song_file(ctx: JobContext, path: PathBuf) -> Result<TrackId, LoadFileError> {
+fn get_replay_gain(tag: &Tag) -> ReplayGain {
+    fn parse_gain_db(val: &str) -> Option<f32> {
+        let val = val.trim();
+
+        // Common cases for "db" suffix
+        let val = val
+            .strip_suffix("db")
+            .or_else(|| val.strip_suffix("DB"))
+            .or_else(|| val.strip_suffix("dB"))
+            .unwrap_or(val);
+
+        val.trim().parse::<f32>().ok().filter(|v| v.is_finite())
+    }
+
+    fn parse_peak(val: &str) -> Option<f32> {
+        val.trim()
+            .parse::<f32>()
+            .ok()
+            .filter(|v| v.is_finite() && *v > 0.0)
+    }
+
+    let track_gain = tag
+        .get_string(ItemKey::ReplayGainTrackGain)
+        .and_then(parse_gain_db);
+
+    let track_peak = tag
+        .get_string(ItemKey::ReplayGainTrackPeak)
+        .and_then(parse_peak);
+
+    let album_gain = tag
+        .get_string(ItemKey::ReplayGainAlbumGain)
+        .and_then(parse_gain_db);
+
+    let album_peak = tag
+        .get_string(ItemKey::ReplayGainAlbumPeak)
+        .and_then(parse_peak);
+
+    ReplayGain {
+        track_gain,
+        track_peak,
+        album_gain,
+        album_peak,
+    }
+}
+
+async fn load_file(ctx: JobContext, path: PathBuf) -> Result<TrackId, LoadFileError> {
     let location = TrackLocation::LocalFile(path.clone());
 
     let (length, Some(ref tag)) = parse_file_tags(path.clone()).await? else {
@@ -296,6 +342,8 @@ async fn load_song_file(ctx: JobContext, path: PathBuf) -> Result<TrackId, LoadF
 
             artists,
             artists_text,
+
+            replay_gain: get_replay_gain(tag),
         })
     })?;
 
@@ -347,7 +395,7 @@ fn search_file_or_directory(
         if metadata.is_dir() {
             search_directory(ctx, path).await
         } else {
-            match load_song_file(ctx, path.clone()).await {
+            match load_file(ctx, path.clone()).await {
                 Ok(_) => Vec::new(),
                 Err(error) => vec![(path, error)],
             }
