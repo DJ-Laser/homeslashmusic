@@ -290,7 +290,7 @@ mod integrity {
                         "Track",
                         MissingDatabaseId::Track(track_id),
                         format!(
-                            "missing or mismatched lookup.track entry for {:?}",
+                            "missing or mismatched lookup.track entry for {}",
                             track.location
                         ),
                     );
@@ -375,7 +375,7 @@ mod integrity {
                     push_err(
                         "lookup.track",
                         MissingDatabaseId::Track(track_id),
-                        format!("location {location:?} points to missing track"),
+                        format!("location {location} points to missing track"),
                     );
                 }
             }
@@ -387,7 +387,7 @@ mod integrity {
                         "TrackGroup",
                         MissingDatabaseId::TrackGroup(group_id),
                         format!(
-                            "missing or mismatched lookup.track_group entry for {:?}",
+                            "missing or mismatched lookup.track_group entry for {}",
                             group.location
                         ),
                     );
@@ -470,7 +470,7 @@ mod integrity {
                     push_err(
                         "lookup.track_group",
                         MissingDatabaseId::TrackGroup(group_id),
-                        format!("location {location:?} points to missing track group"),
+                        format!("location {location} points to missing track group"),
                     );
                 }
             }
@@ -491,7 +491,7 @@ mod integrity {
                         "Song",
                         MissingDatabaseId::Song(song_id),
                         format!(
-                            "missing or mismatched lookup.song entry for MBID {:?}",
+                            "missing or mismatched lookup.song entry for MBID {}",
                             song.mbid
                         ),
                     );
@@ -550,7 +550,7 @@ mod integrity {
                         push_err(
                             "Song",
                             MissingDatabaseId::Song(song_id),
-                            format!("song.relationships contains empty list for {kind:?}"),
+                            format!("song.relationships contains empty list for {kind}"),
                         );
                     }
 
@@ -559,7 +559,7 @@ mod integrity {
                             push_err(
                                 "Song",
                                 MissingDatabaseId::Song(song_id),
-                                format!("self-referential {kind:?} relationship"),
+                                format!("self-referential {kind} relationship"),
                             );
                         }
 
@@ -580,7 +580,7 @@ mod integrity {
                                     "Song",
                                     MissingDatabaseId::Song(song_id),
                                     format!(
-                                        "Song {target_id} does not list {song_id} in derived.related_to[{kind:?}]"
+                                        "Song {target_id} does not list {song_id} in derived.related_to[{kind}]"
                                     ),
                                 );
                             }
@@ -594,7 +594,7 @@ mod integrity {
                         push_err(
                             "Song",
                             MissingDatabaseId::Song(song_id),
-                            format!("song.derived.related_to contains empty list for {kind:?}"),
+                            format!("song.derived.related_to contains empty list for {kind}"),
                         );
                     }
 
@@ -615,7 +615,7 @@ mod integrity {
                                     "Song",
                                     MissingDatabaseId::Song(song_id),
                                     format!(
-                                        "Song {source_id} does not list {song_id} in relationships[{kind:?}]"
+                                        "Song {source_id} does not list {song_id} in relationships[{kind}]"
                                     ),
                                 );
                             }
@@ -629,7 +629,7 @@ mod integrity {
                     push_err(
                         "lookup.song",
                         MissingDatabaseId::Song(song_id),
-                        format!("MBID {mbid:?} points to missing song"),
+                        format!("MBID {mbid} points to missing song"),
                     );
                 }
             }
@@ -648,7 +648,7 @@ mod integrity {
                         "Album",
                         MissingDatabaseId::Album(album_id),
                         format!(
-                            "missing or mismatched lookup.album entry for MBID {:?}",
+                            "missing or mismatched lookup.album entry for MBID {}",
                             album.mbid
                         ),
                     );
@@ -704,7 +704,7 @@ mod integrity {
                     push_err(
                         "lookup.album",
                         MissingDatabaseId::Album(album_id),
-                        format!("MBID {mbid:?} points to missing album"),
+                        format!("MBID {mbid} points to missing album"),
                     );
                 }
             }
@@ -729,7 +729,7 @@ mod integrity {
                         "Artist",
                         MissingDatabaseId::Artist(artist_id),
                         format!(
-                            "missing or mismatched lookup.artist_by_mbid entry for MBID {mbid:?}"
+                            "missing or mismatched lookup.artist_by_mbid entry for MBID {mbid}"
                         ),
                     );
                 }
@@ -775,7 +775,7 @@ mod integrity {
                     push_err(
                         "lookup.artist_by_mbid",
                         MissingDatabaseId::Artist(artist_id),
-                        format!("MBID {mbid:?} points to missing artist"),
+                        format!("MBID {mbid} points to missing artist"),
                     );
                 }
             }
@@ -784,7 +784,7 @@ mod integrity {
                     push_err(
                         "lookup.artist_by_location",
                         MissingDatabaseId::Artist(artist_id),
-                        format!("location {location:?} points to missing artist"),
+                        format!("location {location} points to missing artist"),
                     );
                 }
             }
@@ -796,7 +796,7 @@ mod integrity {
                         "Playlist",
                         MissingDatabaseId::Playlist(playlist_id),
                         format!(
-                            "missing or mismatched lookup.playlist entry for {:?}",
+                            "missing or mismatched lookup.playlist entry for {}",
                             playlist.location
                         ),
                     );
@@ -923,7 +923,7 @@ mod integrity {
                     push_err(
                         "lookup.playlist",
                         MissingDatabaseId::Playlist(playlist_id),
-                        format!("location {location:?} points to missing playlist"),
+                        format!("location {location} points to missing playlist"),
                     );
                 }
             }

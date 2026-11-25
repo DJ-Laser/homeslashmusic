@@ -1,5 +1,6 @@
 use std::{fmt::Display, mem};
 
+use log::error;
 use serde::{Deserialize, Serialize};
 use slotmap::DenseSlotMap;
 
@@ -78,7 +79,7 @@ impl DatabaseStore {
         self.lookup.playlist.get(location).copied()
     }
 
-    pub fn insert_playlist(&mut self, playlist: PlaylistData) -> PlaylistId {
+    fn insert_playlist(&mut self, playlist: PlaylistData) -> PlaylistId {
         let id = self.playlists.insert_with_key(|id| {
             self.lookup.insert_playlist(playlist.location.clone(), id);
 
@@ -161,12 +162,9 @@ impl DatabaseStore {
         playlist.entries = entries;
     }
 
-    pub fn update_or_insert_playlist(
-        &mut self,
-        playlist: PlaylistData,
-    ) -> Result<PlaylistId, MissingDatabaseId> {
+    pub fn update_or_insert_playlist(&mut self, playlist: PlaylistData) -> PlaylistId {
         let Some(id) = self.lookup_playlist(&playlist.location) else {
-            return Ok(self.insert_playlist(playlist));
+            return self.insert_playlist(playlist);
         };
 
         Self::update_playlist_links(
@@ -179,10 +177,15 @@ impl DatabaseStore {
             true,
         );
 
-        let db_playlist = self
-            .playlists
-            .get_mut(id)
-            .ok_or(MissingDatabaseId::Playlist(id))?;
+        let Some(db_playlist) = self.playlists.get_mut(id) else {
+            error!(
+                "Error updating playlist with location {}: {}",
+                playlist.location,
+                MissingDatabaseId::Playlist(id)
+            );
+
+            return self.insert_playlist(playlist);
+        };
 
         let old_playlist = mem::replace(db_playlist, playlist);
 
@@ -198,7 +201,7 @@ impl DatabaseStore {
             false,
         );
 
-        Ok(id)
+        id
     }
 }
 

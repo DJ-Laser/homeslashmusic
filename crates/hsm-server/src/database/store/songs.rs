@@ -1,5 +1,6 @@
 use std::{collections::HashMap, fmt::Display, mem, time::Duration};
 
+use log::error;
 use serde::{Deserialize, Serialize};
 use slotmap::DenseSlotMap;
 
@@ -24,6 +25,17 @@ pub enum SongRelationship {
     Mashup,
     DjMix,
     Compilation,
+}
+
+impl Display for SongRelationship {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SongRelationship::Remix => f.write_str("Remix"),
+            SongRelationship::Mashup => f.write_str("Mashup"),
+            SongRelationship::DjMix => f.write_str("DJ-Mix"),
+            SongRelationship::Compilation => f.write_str("Compilation"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -166,7 +178,7 @@ impl DatabaseStore {
         song
     }
 
-    pub fn insert_song(&mut self, song: SongData) -> SongId {
+    fn insert_song(&mut self, song: SongData) -> SongId {
         let id = self.songs.insert_with_key(|id| {
             let song = Self::fix_song_relationships(id, song);
             self.lookup.insert_song(song.mbid, id);
@@ -181,15 +193,23 @@ impl DatabaseStore {
         id
     }
 
-    pub fn update_or_insert_song(&mut self, song: SongData) -> Result<SongId, MissingDatabaseId> {
+    pub fn update_or_insert_song(&mut self, song: SongData) -> SongId {
         let Some(id) = self.lookup_song(&song.mbid) else {
-            return Ok(self.insert_song(song));
+            return self.insert_song(song);
         };
 
         Self::update_song_relationship_links(&mut self.songs, id, true);
 
         let song = Self::fix_song_relationships(id, song);
-        let db_song = self.songs.get_mut(id).ok_or(MissingDatabaseId::Song(id))?;
+        let Some(db_song) = self.songs.get_mut(id) else {
+            error!(
+                "Error updating song with mbid {}: {}",
+                song.mbid,
+                MissingDatabaseId::Song(id)
+            );
+
+            return self.insert_song(song);
+        };
 
         Self::update_song_links(&mut self.artists, id, db_song, true);
         Self::update_song_links(&mut self.artists, id, &song, false);
@@ -199,7 +219,7 @@ impl DatabaseStore {
 
         Self::update_song_relationship_links(&mut self.songs, id, false);
 
-        Ok(id)
+        id
     }
 }
 

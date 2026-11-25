@@ -14,9 +14,8 @@ use crate::database::{
     sources::{ArtistLocation, TrackGroupLocation, TrackLocation, UpdateContext},
     store::{
         AlbumData, AlbumId, ArtistData, ArtistId, DerivedAlbumData, DerivedArtistData,
-        DerivedSongData, DerivedTrackData, DerivedTrackGroupData, MbidQueryType, MissingDatabaseId,
-        MusicBrainzId, ReplayGain, SongData, SongId, TrackData, TrackGroupData, TrackGroupId,
-        TrackId,
+        DerivedSongData, DerivedTrackData, DerivedTrackGroupData, MbidQueryType, MusicBrainzId,
+        ReplayGain, SongData, SongId, TrackData, TrackGroupData, TrackGroupId, TrackId,
     },
 };
 
@@ -27,9 +26,6 @@ pub enum LoadFileError {
 
     #[error("{0}")]
     ParseFailed(#[from] lofty::error::FileParseError),
-
-    #[error("{0}")]
-    Database(#[from] MissingDatabaseId),
 
     #[error("File had no metadata to parse")]
     MissingTags,
@@ -95,15 +91,18 @@ fn get_artists(ctx: &UpdateContext, tag: &Tag, album: bool) -> Vec<ArtistId> {
             };
 
             db.set_mbid_incomplete(mbid, MbidQueryType::Artist);
-            let id = db.insert_artist(ArtistData {
-                mbid: Some(mbid),
-                locations: location.into_iter().collect(),
-                derived: DerivedArtistData::default(),
+            let id = db.update_or_insert_artist_by_mbid(
+                mbid,
+                ArtistData {
+                    mbid: Some(mbid),
+                    locations: location.into_iter().collect(),
+                    derived: DerivedArtistData::default(),
 
-                name: name.unwrap_or("Unknown Artist").into(),
-                sort_name: None,
-                genres: Vec::new(),
-            });
+                    name: name.unwrap_or("Unknown Artist").into(),
+                    sort_name: None,
+                    genres: Vec::new(),
+                },
+            );
 
             artists.push(id);
         };
@@ -176,7 +175,7 @@ fn get_song(ctx: &UpdateContext, tag: &Tag) -> Option<SongId> {
 
     let song = ctx.write_db(|db| {
         db.set_mbid_incomplete(mbid, MbidQueryType::Recording);
-        db.insert_song(SongData {
+        db.update_or_insert_song(SongData {
             mbid,
             derived: DerivedSongData::default(),
 
@@ -211,7 +210,7 @@ fn get_album(ctx: &UpdateContext, tag: &Tag) -> Option<AlbumId> {
 
     let album = ctx.write_db(|db| {
         db.set_mbid_incomplete(mbid, MbidQueryType::ReleaseGroup);
-        db.insert_album(AlbumData {
+        db.update_or_insert_album(AlbumData {
             mbid,
             derived: DerivedAlbumData::default(),
 
@@ -249,8 +248,8 @@ async fn get_track_group(ctx: &UpdateContext, tag: &Tag) -> Option<TrackGroupId>
     let artists_text = tag.get_string(ItemKey::AlbumArtist).map(Into::into);
     let track_count = tag.track_total();
 
-    let album = ctx.write_db(|db| {
-        db.insert_track_group(TrackGroupData {
+    let track_group = ctx.write_db(|db| {
+        db.update_or_insert_track_group(TrackGroupData {
             provider: ctx.provider().clone(),
             location: guard.location,
             derived: DerivedTrackGroupData::default(),
@@ -265,7 +264,7 @@ async fn get_track_group(ctx: &UpdateContext, tag: &Tag) -> Option<TrackGroupId>
         })
     });
 
-    Some(album)
+    Some(track_group)
 }
 
 fn get_replay_gain(tag: &Tag) -> ReplayGain {
@@ -344,7 +343,7 @@ async fn load_file(ctx: UpdateContext, path: PathBuf) -> Result<TrackId, LoadFil
 
             title: title.unwrap_or_else(|| {
                 path.file_stem()
-                    .expect("load_song_file needs a file path")
+                    .expect("load_file needs a file path")
                     .to_string_lossy()
                     .into_owned()
             }),
@@ -356,7 +355,7 @@ async fn load_file(ctx: UpdateContext, path: PathBuf) -> Result<TrackId, LoadFil
 
             replay_gain: get_replay_gain(tag),
         })
-    })?;
+    });
 
     Ok(track)
 }

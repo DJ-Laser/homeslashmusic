@@ -18,16 +18,12 @@ use crate::database::{
     DatabaseHandle,
     store::{
         AlbumData, AlbumId, ArtistData, ArtistId, DatabaseStore, DerivedAlbumData,
-        DerivedArtistData, DerivedSongData, MissingDatabaseId, MusicBrainzId, SongData, SongId,
-        SongRelationship,
+        DerivedArtistData, DerivedSongData, MusicBrainzId, SongData, SongId, SongRelationship,
     },
 };
 
 #[derive(Debug, Error)]
 pub enum MusicBrainzFetchError {
-    #[error(transparent)]
-    DbError(#[from] MissingDatabaseId),
-
     #[error(transparent)]
     ApiError(Box<musicbrainz_rs::ApiEndpointError>),
 }
@@ -82,7 +78,7 @@ fn insert_artist(
     mbid: MusicBrainzId,
     mb_artist: Artist,
     is_complete: bool,
-) -> Result<ArtistId, MissingDatabaseId> {
+) -> ArtistId {
     let artist = ArtistData {
         mbid: Some(mbid),
         locations: Vec::new(),
@@ -93,12 +89,12 @@ fn insert_artist(
         genres: get_genres(mb_artist.genres),
     };
 
-    let id = db.update_or_insert_artist_by_mbid(mbid, artist)?;
+    let id = db.update_or_insert_artist_by_mbid(mbid, artist);
     if is_complete {
         db.complete_mbid_query(mbid);
     }
 
-    Ok(id)
+    id
 }
 
 pub async fn fetch_artist(
@@ -107,7 +103,7 @@ pub async fn fetch_artist(
 ) -> Result<(), MusicBrainzFetchError> {
     let mb_artist = fetch_rate_limited(&mbid, Artist::fetch().with_genres()).await?;
 
-    handle.write_db(|db| insert_artist(db, mbid, mb_artist, true))?;
+    handle.write_db(|db| insert_artist(db, mbid, mb_artist, true));
 
     Ok(())
 }
@@ -115,9 +111,9 @@ pub async fn fetch_artist(
 fn get_artists(
     db: &mut DatabaseStore,
     artist_credits: Option<Vec<ArtistCredit>>,
-) -> Result<(Vec<ArtistId>, Option<String>), MissingDatabaseId> {
+) -> (Vec<ArtistId>, Option<String>) {
     let Some(artist_credits) = artist_credits else {
-        return Ok((Vec::new(), None));
+        return (Vec::new(), None);
     };
 
     let mut artists = Vec::new();
@@ -135,15 +131,15 @@ fn get_artists(
 
         let id = db
             .lookup_artist_by_mbid(mbid)
-            .map_or_else(|| insert_artist(db, mbid, credit.artist, false), Ok)?;
+            .unwrap_or_else(|| insert_artist(db, mbid, credit.artist, false));
 
         artists.push(id);
     }
 
     if artists.is_empty() {
-        Ok((artists, None))
+        (artists, None)
     } else {
-        Ok((artists, Some(artists_text)))
+        (artists, Some(artists_text))
     }
 }
 
@@ -152,8 +148,8 @@ fn insert_album(
     mbid: MusicBrainzId,
     mb_release_group: ReleaseGroup,
     is_complete: bool,
-) -> Result<AlbumId, MissingDatabaseId> {
-    let (artists, artists_text) = get_artists(db, mb_release_group.artist_credit)?;
+) -> AlbumId {
+    let (artists, artists_text) = get_artists(db, mb_release_group.artist_credit);
 
     let album = AlbumData {
         mbid,
@@ -167,12 +163,12 @@ fn insert_album(
         artists_text,
     };
 
-    let id = db.update_or_insert_album(album)?;
+    let id = db.update_or_insert_album(album);
     if is_complete {
         db.complete_mbid_query(mbid);
     }
 
-    Ok(id)
+    id
 }
 
 pub async fn fetch_release_group(
@@ -182,7 +178,7 @@ pub async fn fetch_release_group(
     let mb_release_group =
         fetch_rate_limited(&mbid, ReleaseGroup::fetch().with_genres().with_artists()).await?;
 
-    handle.write_db(|db| insert_album(db, mbid, mb_release_group, true))?;
+    handle.write_db(|db| insert_album(db, mbid, mb_release_group, true));
 
     Ok(())
 }
@@ -192,11 +188,11 @@ fn insert_song(
     mbid: MusicBrainzId,
     mb_recording: Recording,
     is_complete: bool,
-) -> Result<SongId, MissingDatabaseId> {
-    let (artists, artists_text) = get_artists(db, mb_recording.artist_credit)?;
+) -> SongId {
+    let (artists, artists_text) = get_artists(db, mb_recording.artist_credit);
 
     let relationships = if is_complete {
-        get_song_relationships(db, mb_recording.relations)?
+        get_song_relationships(db, mb_recording.relations)
     } else {
         HashMap::new()
     };
@@ -218,20 +214,20 @@ fn insert_song(
         relationships,
     };
 
-    let id = db.update_or_insert_song(song)?;
+    let id = db.update_or_insert_song(song);
     if is_complete {
         db.complete_mbid_query(mbid);
     }
 
-    Ok(id)
+    id
 }
 
 fn get_song_relationships(
     db: &mut DatabaseStore,
     relations: Option<Vec<Relation>>,
-) -> Result<HashMap<SongRelationship, Vec<SongId>>, MissingDatabaseId> {
+) -> HashMap<SongRelationship, Vec<SongId>> {
     let Some(mut relations) = relations else {
-        return Ok(HashMap::new());
+        return HashMap::new();
     };
 
     // Preserve ordered track lists, and put unordered relationships at the end
@@ -263,7 +259,7 @@ fn get_song_relationships(
 
         let target_id = db
             .lookup_song(&mbid)
-            .map_or_else(|| insert_song(db, mbid, *target_recording, false), Ok)?;
+            .unwrap_or_else(|| insert_song(db, mbid, *target_recording, false));
 
         let list = relationships.entry(kind).or_default();
         if !list.contains(&target_id) {
@@ -271,7 +267,7 @@ fn get_song_relationships(
         }
     }
 
-    Ok(relationships)
+    relationships
 }
 
 pub async fn fetch_recording(
@@ -287,7 +283,7 @@ pub async fn fetch_recording(
     )
     .await?;
 
-    handle.write_db(|db| insert_song(db, mbid, mb_recording, true))?;
+    handle.write_db(|db| insert_song(db, mbid, mb_recording, true));
 
     Ok(())
 }

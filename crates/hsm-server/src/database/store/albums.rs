@@ -1,5 +1,6 @@
 use std::{fmt::Display, mem};
 
+use log::error;
 use serde::{Deserialize, Serialize};
 use slotmap::DenseSlotMap;
 
@@ -81,7 +82,7 @@ impl DatabaseStore {
         self.lookup.album.get(&mbid).copied()
     }
 
-    pub fn insert_album(&mut self, album: AlbumData) -> AlbumId {
+    fn insert_album(&mut self, album: AlbumData) -> AlbumId {
         self.albums.insert_with_key(|id| {
             self.lookup.insert_album(album.mbid, id);
 
@@ -110,18 +111,20 @@ impl DatabaseStore {
         }
     }
 
-    pub fn update_or_insert_album(
-        &mut self,
-        album: AlbumData,
-    ) -> Result<AlbumId, MissingDatabaseId> {
+    pub fn update_or_insert_album(&mut self, album: AlbumData) -> AlbumId {
         let Some(id) = self.lookup_album(album.mbid) else {
-            return Ok(self.insert_album(album));
+            return self.insert_album(album);
         };
 
-        let db_album = self
-            .albums
-            .get_mut(id)
-            .ok_or(MissingDatabaseId::Album(id))?;
+        let Some(db_album) = self.albums.get_mut(id) else {
+            error!(
+                "Error updating album with mbid {}: {}",
+                album.mbid,
+                MissingDatabaseId::Album(id)
+            );
+
+            return self.insert_album(album);
+        };
 
         Self::update_album_links(&mut self.artists, id, db_album, true);
 
@@ -130,7 +133,7 @@ impl DatabaseStore {
 
         Self::update_album_links(&mut self.artists, id, db_album, false);
 
-        Ok(id)
+        id
     }
 }
 

@@ -1,5 +1,6 @@
 use std::{fmt::Display, mem};
 
+use log::error;
 use serde::{Deserialize, Serialize};
 
 use crate::database::{
@@ -88,7 +89,7 @@ impl DatabaseStore {
         self.lookup.artist_by_location.get(location).copied()
     }
 
-    pub fn insert_artist(&mut self, artist: ArtistData) -> ArtistId {
+    fn insert_artist(&mut self, artist: ArtistData) -> ArtistId {
         self.artists.insert_with_key(|id| {
             self.lookup
                 .insert_artist(artist.mbid, &artist.locations, id);
@@ -119,16 +120,21 @@ impl DatabaseStore {
         &mut self,
         mbid: MusicBrainzId,
         mut artist: ArtistData,
-    ) -> Result<ArtistId, MissingDatabaseId> {
+    ) -> ArtistId {
         let Some(id) = self.lookup_artist_by_mbid(mbid) else {
             artist.mbid = Some(mbid);
-            return Ok(self.insert_artist(artist));
+            return self.insert_artist(artist);
         };
 
-        let db_artist = self
-            .artists
-            .get_mut(id)
-            .ok_or(MissingDatabaseId::Artist(id))?;
+        let Some(db_artist) = self.artists.get_mut(id) else {
+            error!(
+                "Error updating artist with mbid {}: {}",
+                mbid,
+                MissingDatabaseId::Artist(id)
+            );
+
+            return self.insert_artist(artist);
+        };
 
         for location in db_artist.locations.drain(..) {
             if !artist.locations.contains(&location) {
@@ -139,7 +145,7 @@ impl DatabaseStore {
         let old_artist = mem::replace(db_artist, artist);
         db_artist.derived = old_artist.derived;
 
-        Ok(id)
+        id
     }
 }
 

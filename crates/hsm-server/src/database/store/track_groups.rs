@@ -1,5 +1,6 @@
 use std::{fmt::Display, mem};
 
+use log::error;
 use serde::{Deserialize, Serialize};
 use slotmap::DenseSlotMap;
 
@@ -79,7 +80,7 @@ impl DatabaseStore {
         self.lookup.track_group.get(location).copied()
     }
 
-    pub fn insert_track_group(&mut self, track_group: TrackGroupData) -> TrackGroupId {
+    fn insert_track_group(&mut self, track_group: TrackGroupData) -> TrackGroupId {
         self.track_groups.insert_with_key(|id| {
             self.lookup
                 .insert_track_group(track_group.location.clone(), id);
@@ -132,18 +133,20 @@ impl DatabaseStore {
         }
     }
 
-    pub fn update_or_insert_track_group(
-        &mut self,
-        track_group: TrackGroupData,
-    ) -> Result<TrackGroupId, MissingDatabaseId> {
+    pub fn update_or_insert_track_group(&mut self, track_group: TrackGroupData) -> TrackGroupId {
         let Some(id) = self.lookup_track_group(&track_group.location) else {
-            return Ok(self.insert_track_group(track_group));
+            return self.insert_track_group(track_group);
         };
 
-        let db_track_group = self
-            .track_groups
-            .get_mut(id)
-            .ok_or(MissingDatabaseId::TrackGroup(id))?;
+        let Some(db_track_group) = self.track_groups.get_mut(id) else {
+            error!(
+                "Error updating track group with location {}: {}",
+                track_group.location,
+                MissingDatabaseId::TrackGroup(id)
+            );
+
+            return self.insert_track_group(track_group);
+        };
 
         Self::update_track_group_links(
             &mut self.albums,
@@ -164,7 +167,7 @@ impl DatabaseStore {
             false,
         );
 
-        Ok(id)
+        id
     }
 }
 

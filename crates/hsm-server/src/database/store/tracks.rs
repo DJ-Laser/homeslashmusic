@@ -4,6 +4,7 @@ use std::{
     time::Duration,
 };
 
+use log::error;
 use serde::{Deserialize, Serialize};
 use slotmap::DenseSlotMap;
 
@@ -153,18 +154,20 @@ impl DatabaseStore {
         })
     }
 
-    pub fn update_or_insert_track(
-        &mut self,
-        track: TrackData,
-    ) -> Result<TrackId, MissingDatabaseId> {
+    pub fn update_or_insert_track(&mut self, track: TrackData) -> TrackId {
         let Some(id) = self.lookup_track(&track.location) else {
-            return Ok(self.insert_track(track));
+            return self.insert_track(track);
         };
 
-        let db_track = self
-            .tracks
-            .get_mut(id)
-            .ok_or(MissingDatabaseId::Track(id))?;
+        let Some(db_track) = self.tracks.get_mut(id) else {
+            error!(
+                "Error updating track with location {}: {}",
+                track.location,
+                MissingDatabaseId::Track(id)
+            );
+
+            return self.insert_track(track);
+        };
 
         Self::update_track_links(
             &mut self.songs,
@@ -187,7 +190,7 @@ impl DatabaseStore {
             false,
         );
 
-        Ok(id)
+        id
     }
 }
 
