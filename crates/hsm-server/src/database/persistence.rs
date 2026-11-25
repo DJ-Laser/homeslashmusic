@@ -114,9 +114,19 @@ pub async fn save_db(handle: &DatabaseHandle, path: PathBuf) -> Result<(), SaveD
 }
 
 async fn save_db_debounced(handle: DatabaseHandle, waker: channel::Receiver<()>) {
-    loop {
+    async fn save_handle_err(handle: &DatabaseHandle) {
+        let save_path = handle.read_config(|config| config.database_file_path.clone());
+
+        if let Err(error) = save_db(handle, save_path.clone()).await {
+            error!("Error saving the database: {error}");
+        } else {
+            info!("Successfully saved database to {}", save_path.display());
+        }
+    }
+
+    'main: loop {
         if waker.recv().await.is_err() {
-            break;
+            break 'main;
         }
 
         let (debounce_delay, max_delay) =
@@ -141,19 +151,16 @@ async fn save_db_debounced(handle: DatabaseHandle, waker: channel::Receiver<()>)
 
             // If no write happened, or the channel was dropped, save the file
             match write_occurred {
-                Ok(false) | Err(_) => break,
+                Ok(false) => break,
                 Ok(true) => (),
+                Err(_) => break 'main,
             }
         }
 
-        let save_path = handle.read_config(|config| config.database_file_path.clone());
-
-        if let Err(error) = save_db(&handle, save_path.clone()).await {
-            error!("Error saving the database: {error}");
-        } else {
-            info!("Successfully saved database to {}", save_path.display());
-        }
+        save_handle_err(&handle).await;
     }
+
+    save_handle_err(&handle).await;
 }
 
 #[derive(Debug)]
