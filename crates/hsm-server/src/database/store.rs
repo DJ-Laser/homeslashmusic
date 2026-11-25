@@ -87,17 +87,23 @@ impl DatabaseStore {
     pub fn rebuild_derived(&mut self) {
         self.lookup.clear();
 
-        for (_, song) in &mut self.songs {
+        for track in self.tracks.values_mut() {
+            track.derived.clear();
+        }
+        for song in self.songs.values_mut() {
             song.derived.clear();
         }
-        for (_, track_group) in &mut self.track_groups {
+        for track_group in self.track_groups.values_mut() {
             track_group.derived.clear();
         }
-        for (_, album) in &mut self.albums {
+        for album in self.albums.values_mut() {
             album.derived.clear();
         }
-        for (_, artist) in &mut self.artists {
+        for artist in self.artists.values_mut() {
             artist.derived.clear();
+        }
+        for playlist in self.playlists.values_mut() {
+            playlist.derived.clear();
         }
 
         for (id, track) in &self.tracks {
@@ -124,10 +130,6 @@ impl DatabaseStore {
             );
         }
 
-        for (id, playlist) in &self.playlists {
-            self.lookup.insert_playlist(playlist.location.clone(), id);
-        }
-
         for (id, song) in &self.songs {
             self.lookup.insert_song(song.mbid, id);
             Self::update_song_links(&mut self.artists, id, song, false);
@@ -141,6 +143,24 @@ impl DatabaseStore {
         for (id, artist) in &self.artists {
             self.lookup
                 .insert_artist(artist.mbid, &artist.locations, id);
+        }
+
+        let mut playlist_ids = Vec::with_capacity(self.playlists.len());
+        for (id, playlist) in &self.playlists {
+            self.lookup.insert_playlist(playlist.location.clone(), id);
+            playlist_ids.push(id);
+        }
+
+        for id in playlist_ids {
+            Self::update_playlist_links(
+                &mut self.tracks,
+                &mut self.track_groups,
+                &mut self.songs,
+                &mut self.albums,
+                &mut self.playlists,
+                id,
+                false,
+            );
         }
     }
 

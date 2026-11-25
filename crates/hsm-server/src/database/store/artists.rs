@@ -50,6 +50,8 @@ impl DerivedArtistData {
     }
 
     pub(super) fn clear(&mut self) {
+        self.tracks.clear();
+        self.track_groups.clear();
         self.songs.clear();
         self.albums.clear();
     }
@@ -134,11 +136,8 @@ impl DatabaseStore {
             }
         }
 
-        *db_artist = ArtistData {
-            mbid: db_artist.mbid,
-            derived: mem::replace(&mut db_artist.derived, artist.derived),
-            ..artist
-        };
+        let old_artist = mem::replace(db_artist, artist);
+        db_artist.derived = old_artist.derived;
 
         Ok(id)
     }

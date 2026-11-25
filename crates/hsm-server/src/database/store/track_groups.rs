@@ -6,7 +6,8 @@ use slotmap::DenseSlotMap;
 use crate::database::{
     sources::TrackGroupLocation,
     store::{
-        AlbumData, AlbumId, ArtistData, ArtistId, DatabaseStore, Lookup, MissingDatabaseId, TrackId,
+        AlbumData, AlbumId, ArtistData, ArtistId, DatabaseStore, Lookup, MissingDatabaseId,
+        PlaylistId, TrackId,
     },
 };
 
@@ -23,6 +24,7 @@ impl Display for TrackGroupId {
 #[derive(Debug, Clone, Default)]
 pub struct DerivedTrackGroupData {
     pub(super) tracks: Vec<TrackId>,
+    pub(super) in_playlists: Vec<PlaylistId>,
 }
 
 impl DerivedTrackGroupData {
@@ -31,8 +33,14 @@ impl DerivedTrackGroupData {
         &self.tracks
     }
 
+    /// Playlists this track group is in
+    pub fn in_playlists(&self) -> &Vec<PlaylistId> {
+        &self.in_playlists
+    }
+
     pub(super) fn clear(&mut self) {
         self.tracks.clear();
+        self.in_playlists.clear();
     }
 }
 
@@ -143,11 +151,8 @@ impl DatabaseStore {
             true,
         );
 
-        *db_track_group = TrackGroupData {
-            location: mem::replace(&mut db_track_group.location, track_group.location),
-            derived: mem::replace(&mut db_track_group.derived, track_group.derived),
-            ..track_group
-        };
+        let old_track_group = mem::replace(db_track_group, track_group);
+        db_track_group.derived = old_track_group.derived;
 
         Self::update_track_group_links(
             &mut self.albums,

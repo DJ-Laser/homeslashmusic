@@ -10,8 +10,8 @@ use slotmap::DenseSlotMap;
 use crate::database::{
     sources::TrackLocation,
     store::{
-        ArtistData, ArtistId, DatabaseStore, Lookup, MissingDatabaseId, SongData, SongId,
-        TrackGroupData, TrackGroupId,
+        ArtistData, ArtistId, DatabaseStore, Lookup, MissingDatabaseId, PlaylistId, SongData,
+        SongId, TrackGroupData, TrackGroupId,
     },
 };
 
@@ -38,7 +38,20 @@ pub struct ReplayGain {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct DerivedTrackData {}
+pub struct DerivedTrackData {
+    pub(super) in_playlists: Vec<PlaylistId>,
+}
+
+impl DerivedTrackData {
+    /// Playlists this track is in
+    pub fn in_playlists(&self) -> &Vec<PlaylistId> {
+        &self.in_playlists
+    }
+
+    pub fn clear(&mut self) {
+        self.in_playlists.clear();
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrackData {
@@ -73,7 +86,7 @@ impl DatabaseStore {
         self.tracks.get(id).ok_or(MissingDatabaseId::Track(id))
     }
 
-    pub fn lookup_track_by_location(&self, location: &TrackLocation) -> Option<TrackId> {
+    pub fn lookup_track(&self, location: &TrackLocation) -> Option<TrackId> {
         self.lookup.track.get(location).copied()
     }
 
@@ -142,7 +155,7 @@ impl DatabaseStore {
         &mut self,
         track: TrackData,
     ) -> Result<TrackId, MissingDatabaseId> {
-        let Some(id) = self.lookup_track_by_location(&track.location) else {
+        let Some(id) = self.lookup_track(&track.location) else {
             return Ok(self.insert_track(track));
         };
 
@@ -160,11 +173,8 @@ impl DatabaseStore {
             true,
         );
 
-        *db_track = TrackData {
-            location: mem::replace(&mut db_track.location, track.location),
-            derived: mem::replace(&mut db_track.derived, track.derived),
-            ..track
-        };
+        let old_track = mem::replace(db_track, track);
+        db_track.derived = old_track.derived;
 
         Self::update_track_links(
             &mut self.songs,

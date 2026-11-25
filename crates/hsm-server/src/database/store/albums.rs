@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use slotmap::DenseSlotMap;
 
 use crate::database::store::{
-    ArtistData, ArtistId, DatabaseStore, Lookup, MissingDatabaseId, MusicBrainzId, SongId,
+    ArtistData, ArtistId, DatabaseStore, Lookup, MissingDatabaseId, MusicBrainzId, PlaylistId,
     TrackGroupId,
 };
 
@@ -20,24 +20,24 @@ impl Display for AlbumId {
 
 #[derive(Debug, Clone, Default)]
 pub struct DerivedAlbumData {
-    pub(super) songs: Vec<SongId>,
     pub(super) track_groups: Vec<TrackGroupId>,
+    pub(super) in_playlists: Vec<PlaylistId>,
 }
 
 impl DerivedAlbumData {
-    /// Songs in this album
-    pub fn songs(&self) -> &Vec<SongId> {
-        &self.songs
-    }
-
     /// Track groups for this album
     pub fn track_groups(&self) -> &Vec<TrackGroupId> {
         &self.track_groups
     }
 
+    /// Playlists this album is in
+    pub fn in_playlists(&self) -> &Vec<PlaylistId> {
+        &self.in_playlists
+    }
+
     pub(super) fn clear(&mut self) {
-        self.songs.clear();
         self.track_groups.clear();
+        self.in_playlists.clear();
     }
 }
 
@@ -125,11 +125,8 @@ impl DatabaseStore {
 
         Self::update_album_links(&mut self.artists, id, db_album, true);
 
-        *db_album = AlbumData {
-            mbid: db_album.mbid,
-            derived: mem::replace(&mut db_album.derived, album.derived),
-            ..album
-        };
+        let old_album = mem::replace(db_album, album);
+        db_album.derived = old_album.derived;
 
         Self::update_album_links(&mut self.artists, id, db_album, false);
 

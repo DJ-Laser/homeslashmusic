@@ -1,10 +1,11 @@
-use std::{fmt::Display, time::Duration};
+use std::{fmt::Display, mem, time::Duration};
 
 use serde::{Deserialize, Serialize};
 use slotmap::DenseSlotMap;
 
 use crate::database::store::{
-    ArtistData, ArtistId, DatabaseStore, Lookup, MissingDatabaseId, MusicBrainzId, TrackId,
+    ArtistData, ArtistId, DatabaseStore, Lookup, MissingDatabaseId, MusicBrainzId, PlaylistId,
+    TrackId,
 };
 
 slotmap::new_key_type! {
@@ -20,6 +21,7 @@ impl Display for SongId {
 #[derive(Debug, Clone, Default)]
 pub struct DerivedSongData {
     pub(super) tracks: Vec<TrackId>,
+    pub(super) in_playlists: Vec<PlaylistId>,
 }
 
 impl DerivedSongData {
@@ -28,8 +30,14 @@ impl DerivedSongData {
         &self.tracks
     }
 
+    /// Playlists this song is in
+    pub fn in_playlists(&self) -> &Vec<PlaylistId> {
+        &self.in_playlists
+    }
+
     pub(super) fn clear(&mut self) {
         self.tracks.clear();
+        self.in_playlists.clear();
     }
 }
 
@@ -108,13 +116,8 @@ impl DatabaseStore {
         Self::update_song_links(&mut self.artists, id, db_song, true);
         Self::update_song_links(&mut self.artists, id, &song, false);
 
-        db_song.title = song.title;
-        db_song.artists = song.artists;
-        db_song.artists_text = song.artists_text;
-        db_song.genres = song.genres;
-        db_song.date = song.date;
-        db_song.length = song.length;
-        db_song.mix_songs = song.mix_songs;
+        let old_song = mem::replace(db_song, song);
+        db_song.derived = old_song.derived;
 
         Ok(id)
     }
