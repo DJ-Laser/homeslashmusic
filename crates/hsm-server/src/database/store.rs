@@ -197,10 +197,10 @@ impl DatabaseStore {
         println!();
         for (_, song) in &self.songs {
             println!(
-                "{} - {}, ({} mixed songs)",
+                "{} - {}, ({} related songs)",
                 song.title,
                 song.artists_text.as_deref().unwrap_or("Unknown Artist"),
-                song.mix_songs.len()
+                song.relationships.values().map(Vec::len).sum::<usize>()
             );
         }
 
@@ -370,7 +370,6 @@ mod integrity {
                     }
                 }
             }
-
             for (location, &track_id) in &self.lookup.track {
                 if !self.tracks.contains_key(track_id) {
                     push_err(
@@ -466,7 +465,6 @@ mod integrity {
                     }
                 }
             }
-
             for (location, &group_id) in &self.lookup.track_group {
                 if !self.track_groups.contains_key(group_id) {
                     push_err(
@@ -477,9 +475,10 @@ mod integrity {
                 }
             }
 
-            // 3. Songs -> Tracks, Artists, in_playlists + lookup.song
+            // 3. Songs -> Tracks, Artists, in_playlists, relationships, derived.related_to + lookup.song
             for (song_id, song) in &self.songs {
-                if song.derived.tracks.is_empty() {
+                // Relationship targets can be listed for metadata purposes without playable tracks
+                if song.derived.related_to.is_empty() && song.derived.tracks.is_empty() {
                     push_err(
                         "Song",
                         MissingDatabaseId::Song(song_id),
@@ -487,13 +486,14 @@ mod integrity {
                     );
                 }
 
-                if let mbid = &song.mbid
-                    && self.lookup.song.get(mbid) != Some(&song_id)
-                {
+                if self.lookup.song.get(&song.mbid) != Some(&song_id) {
                     push_err(
                         "Song",
                         MissingDatabaseId::Song(song_id),
-                        format!("missing or mismatched lookup.song entry for MBID {mbid:?}"),
+                        format!(
+                            "missing or mismatched lookup.song entry for MBID {:?}",
+                            song.mbid
+                        ),
                     );
                 }
 
@@ -524,6 +524,7 @@ mod integrity {
                         _ => {}
                     }
                 }
+
                 for &playlist_id in &song.derived.in_playlists {
                     match self.playlists.get(playlist_id) {
                         None => push_err(
@@ -543,6 +544,85 @@ mod integrity {
                         _ => {}
                     }
                 }
+
+                for (kind, targets) in &song.relationships {
+                    if targets.is_empty() {
+                        push_err(
+                            "Song",
+                            MissingDatabaseId::Song(song_id),
+                            format!("song.relationships contains empty list for {kind:?}"),
+                        );
+                    }
+
+                    for &target_id in targets {
+                        if target_id == song_id {
+                            push_err(
+                                "Song",
+                                MissingDatabaseId::Song(song_id),
+                                format!("self-referential {kind:?} relationship"),
+                            );
+                        }
+
+                        match self.songs.get(target_id) {
+                            None => push_err(
+                                "Song",
+                                MissingDatabaseId::Song(song_id),
+                                MissingDatabaseId::Song(target_id).to_string(),
+                            ),
+                            Some(target)
+                                if !target
+                                    .derived
+                                    .related_to
+                                    .get(kind)
+                                    .is_some_and(|list| list.contains(&song_id)) =>
+                            {
+                                push_err(
+                                    "Song",
+                                    MissingDatabaseId::Song(song_id),
+                                    format!(
+                                        "Song {target_id} does not list {song_id} in derived.related_to[{kind:?}]"
+                                    ),
+                                );
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+
+                for (kind, sources) in &song.derived.related_to {
+                    if sources.is_empty() {
+                        push_err(
+                            "Song",
+                            MissingDatabaseId::Song(song_id),
+                            format!("song.derived.related_to contains empty list for {kind:?}"),
+                        );
+                    }
+
+                    for &source_id in sources {
+                        match self.songs.get(source_id) {
+                            None => push_err(
+                                "Song",
+                                MissingDatabaseId::Song(song_id),
+                                MissingDatabaseId::Song(source_id).to_string(),
+                            ),
+                            Some(source)
+                                if !source
+                                    .relationships
+                                    .get(kind)
+                                    .is_some_and(|list| list.contains(&song_id)) =>
+                            {
+                                push_err(
+                                    "Song",
+                                    MissingDatabaseId::Song(song_id),
+                                    format!(
+                                        "Song {source_id} does not list {song_id} in relationships[{kind:?}]"
+                                    ),
+                                );
+                            }
+                            _ => {}
+                        }
+                    }
+                }
             }
             for (mbid, &song_id) in &self.lookup.song {
                 if !self.songs.contains_key(song_id) {
@@ -553,6 +633,7 @@ mod integrity {
                     );
                 }
             }
+
             // 4. Albums -> TrackGroups, Artists, in_playlists + lookup.album
             for (album_id, album) in &self.albums {
                 if album.derived.track_groups.is_empty() {
@@ -562,13 +643,14 @@ mod integrity {
                         "orphaned album with empty album.derived.track_groups".into(),
                     );
                 }
-                if let mbid = &album.mbid
-                    && self.lookup.album.get(mbid) != Some(&album_id)
-                {
+                if self.lookup.album.get(&album.mbid) != Some(&album_id) {
                     push_err(
                         "Album",
                         MissingDatabaseId::Album(album_id),
-                        format!("missing or mismatched lookup.album entry for MBID {mbid:?}"),
+                        format!(
+                            "missing or mismatched lookup.album entry for MBID {:?}",
+                            album.mbid
+                        ),
                     );
                 }
                 for &group_id in &album.derived.track_groups {
@@ -626,6 +708,7 @@ mod integrity {
                     );
                 }
             }
+
             // 5. Artists -> derived.{tracks, track_groups, songs, albums} + lookup.artist_by_*
             for (artist_id, artist) in &self.artists {
                 if artist.derived.tracks.is_empty()
@@ -705,6 +788,7 @@ mod integrity {
                     );
                 }
             }
+
             // 6. Playlists -> Entries + derived.in_playlists + lookup.playlist
             for (playlist_id, playlist) in &self.playlists {
                 if self.lookup.playlist.get(&playlist.location) != Some(&playlist_id) {
@@ -843,6 +927,7 @@ mod integrity {
                     );
                 }
             }
+
             if errors.is_empty() {
                 Ok(())
             } else {

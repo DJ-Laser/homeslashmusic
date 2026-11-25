@@ -1,4 +1,4 @@
-use std::{fmt::Display, mem, time::Duration};
+use std::{collections::HashMap, fmt::Display, mem, time::Duration};
 
 use serde::{Deserialize, Serialize};
 use slotmap::DenseSlotMap;
@@ -18,9 +18,18 @@ impl Display for SongId {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum SongRelationship {
+    Remix,
+    Mashup,
+    DjMix,
+    Compilation,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct DerivedSongData {
     pub(super) tracks: Vec<TrackId>,
+    pub(super) related_to: HashMap<SongRelationship, Vec<SongId>>,
     pub(super) in_playlists: Vec<PlaylistId>,
 }
 
@@ -30,6 +39,11 @@ impl DerivedSongData {
         &self.tracks
     }
 
+    /// Songs that are remixes/compilations of this song
+    pub fn related_to(&self) -> &HashMap<SongRelationship, Vec<SongId>> {
+        &self.related_to
+    }
+
     /// Playlists this song is in
     pub fn in_playlists(&self) -> &Vec<PlaylistId> {
         &self.in_playlists
@@ -37,6 +51,7 @@ impl DerivedSongData {
 
     pub(super) fn clear(&mut self) {
         self.tracks.clear();
+        self.related_to.clear();
         self.in_playlists.clear();
     }
 }
@@ -64,8 +79,8 @@ pub struct SongData {
     /// The genres associated with this song, sorted by relevance
     pub genres: Vec<String>,
 
-    /// Contains the songs included in this one if it is a mix or dj set
-    pub mix_songs: Vec<SongId>,
+    /// Relationships from this song to the songs it remixes/compiles
+    pub relationships: HashMap<SongRelationship, Vec<SongId>>,
 }
 
 impl DatabaseStore {
@@ -96,14 +111,74 @@ impl DatabaseStore {
         }
     }
 
+    fn update_song_relationship_links(
+        songs: &mut DenseSlotMap<SongId, SongData>,
+        id: SongId,
+        remove: bool,
+    ) {
+        let Some(relationships) = songs
+            .get_mut(id)
+            .map(|song| mem::take(&mut song.relationships))
+        else {
+            return;
+        };
+
+        for (relationship, targets) in &relationships {
+            for &target_id in targets {
+                let Some(target) = songs.get_mut(target_id) else {
+                    continue;
+                };
+
+                if remove {
+                    if let Some(list) = target.derived.related_to.get_mut(relationship) {
+                        list.retain(|song_id| *song_id != id);
+                        if list.is_empty() {
+                            target.derived.related_to.remove(relationship);
+                        }
+                    }
+                } else {
+                    let list = target
+                        .derived
+                        .related_to
+                        .entry(relationship.clone())
+                        .or_default();
+                    if !list.contains(&id) {
+                        list.push(id);
+                    }
+                }
+            }
+        }
+
+        let Some(song) = songs.get_mut(id) else {
+            return;
+        };
+
+        song.relationships = relationships;
+    }
+
+    fn fix_song_relationships(id: SongId, mut song: SongData) -> SongData {
+        for targets in song.relationships.values_mut() {
+            targets.retain(|song_id| *song_id != id);
+        }
+
+        song.relationships.retain(|_, targets| !targets.is_empty());
+
+        song
+    }
+
     pub fn insert_song(&mut self, song: SongData) -> SongId {
-        self.songs.insert_with_key(|id| {
+        let id = self.songs.insert_with_key(|id| {
+            let song = Self::fix_song_relationships(id, song);
             self.lookup.insert_song(song.mbid, id);
 
             Self::update_song_links(&mut self.artists, id, &song, false);
 
             song
-        })
+        });
+
+        Self::update_song_relationship_links(&mut self.songs, id, false);
+
+        id
     }
 
     pub fn update_or_insert_song(&mut self, song: SongData) -> Result<SongId, MissingDatabaseId> {
@@ -111,6 +186,9 @@ impl DatabaseStore {
             return Ok(self.insert_song(song));
         };
 
+        Self::update_song_relationship_links(&mut self.songs, id, true);
+
+        let song = Self::fix_song_relationships(id, song);
         let db_song = self.songs.get_mut(id).ok_or(MissingDatabaseId::Song(id))?;
 
         Self::update_song_links(&mut self.artists, id, db_song, true);
@@ -118,6 +196,8 @@ impl DatabaseStore {
 
         let old_song = mem::replace(db_song, song);
         db_song.derived = old_song.derived;
+
+        Self::update_song_relationship_links(&mut self.songs, id, false);
 
         Ok(id)
     }

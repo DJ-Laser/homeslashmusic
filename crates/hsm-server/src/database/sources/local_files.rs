@@ -1,4 +1,4 @@
-use std::{io, iter, ops::ControlFlow, path::PathBuf, time::Duration};
+use std::{collections::HashMap, io, iter, ops::ControlFlow, path::PathBuf, time::Duration};
 
 use lofty::{
     file::{AudioFile, TaggedFileExt},
@@ -185,7 +185,7 @@ fn get_song(ctx: &UpdateContext, tag: &Tag) -> Option<SongId> {
             artists,
             artists_text,
 
-            mix_songs: Vec::new(),
+            relationships: HashMap::new(),
         })
     });
 

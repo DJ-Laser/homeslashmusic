@@ -1,4 +1,4 @@
-use std::{num::NonZeroU32, sync::LazyLock, time::Duration};
+use std::{collections::HashMap, num::NonZeroU32, sync::LazyLock, time::Duration};
 
 use governor::{Jitter, Quota, RateLimiter};
 use musicbrainz_rs::{
@@ -19,6 +19,7 @@ use crate::database::{
     store::{
         AlbumData, AlbumId, ArtistData, ArtistId, DatabaseStore, DerivedAlbumData,
         DerivedArtistData, DerivedSongData, MissingDatabaseId, MusicBrainzId, SongData, SongId,
+        SongRelationship,
     },
 };
 
@@ -194,7 +195,11 @@ fn insert_song(
 ) -> Result<SongId, MissingDatabaseId> {
     let (artists, artists_text) = get_artists(db, mb_recording.artist_credit)?;
 
-    let mix_songs = get_mix_songs(db, mb_recording.relations)?;
+    let relationships = if is_complete {
+        get_song_relationships(db, mb_recording.relations)?
+    } else {
+        HashMap::new()
+    };
 
     let song = SongData {
         mbid,
@@ -210,7 +215,7 @@ fn insert_song(
         artists,
         artists_text,
 
-        mix_songs,
+        relationships,
     };
 
     let id = db.update_or_insert_song(song)?;
@@ -221,37 +226,52 @@ fn insert_song(
     Ok(id)
 }
 
-fn get_mix_songs(
+fn get_song_relationships(
     db: &mut DatabaseStore,
     relations: Option<Vec<Relation>>,
-) -> Result<Vec<SongId>, MissingDatabaseId> {
-    let Some(relations) = relations else {
-        return Ok(Vec::new());
+) -> Result<HashMap<SongRelationship, Vec<SongId>>, MissingDatabaseId> {
+    let Some(mut relations) = relations else {
+        return Ok(HashMap::new());
     };
 
-    relations
-        .into_iter()
-        .map(|relation| {
-            if relation.relation_type != "DJ-mix" {
-                return Ok(None);
-            }
+    // Preserve ordered track lists, and put unordered relationships at the end
+    relations.sort_by_key(|rel| rel.ordering_key.unwrap_or(u64::MAX));
 
-            let RelationContent::Recording(mix_recording) = relation.content else {
-                return Ok(None);
-            };
+    let mut relationships: HashMap<SongRelationship, Vec<SongId>> = HashMap::new();
 
-            let Ok(mbid) = MusicBrainzId::parse_str(&mix_recording.id) else {
-                return Ok(None);
-            };
+    for relation in relations {
+        // Forward means that this song is the remix/compilation
+        if relation.direction != "forward" {
+            continue;
+        }
 
-            let id = db
-                .lookup_song(&mbid)
-                .map_or_else(|| insert_song(db, mbid, *mix_recording, false), Ok)?;
+        let kind = match relation.relation_type.as_str() {
+            "remix" => SongRelationship::Remix,
+            "mashes up" => SongRelationship::Mashup,
+            "DJ-mix" => SongRelationship::DjMix,
+            "compilation" => SongRelationship::Compilation,
+            _ => continue,
+        };
 
-            Ok(Some(id))
-        })
-        .filter_map(Result::transpose)
-        .collect()
+        let RelationContent::Recording(target_recording) = relation.content else {
+            continue;
+        };
+
+        let Ok(mbid) = MusicBrainzId::parse_str(&target_recording.id) else {
+            continue;
+        };
+
+        let target_id = db
+            .lookup_song(&mbid)
+            .map_or_else(|| insert_song(db, mbid, *target_recording, false), Ok)?;
+
+        let list = relationships.entry(kind).or_default();
+        if !list.contains(&target_id) {
+            list.push(target_id);
+        }
+    }
+
+    Ok(relationships)
 }
 
 pub async fn fetch_recording(
