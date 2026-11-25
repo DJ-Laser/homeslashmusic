@@ -1,7 +1,7 @@
 use slotmap::Key as _;
 
 use crate::database::store::{
-    AlbumId, ArtistId, SearchableEntityId, SongId, TrackGroupId, TrackId,
+    AlbumId, ArtistId, PlaylistId, SearchableEntityId, SongId, TrackGroupId, TrackId,
 };
 
 macro_rules! key_ipc_impls {
@@ -25,6 +25,7 @@ key_ipc_impls!(TrackGroupId);
 key_ipc_impls!(SongId);
 key_ipc_impls!(AlbumId);
 key_ipc_impls!(ArtistId);
+key_ipc_impls!(PlaylistId);
 
 impl From<SearchableEntityId> for hsm_ipc::SearchResult {
     fn from(value: SearchableEntityId) -> Self {
@@ -37,6 +38,9 @@ impl From<SearchableEntityId> for hsm_ipc::SearchResult {
             SearchableEntityId::Album(album_id) => hsm_ipc::SearchResult::Album(album_id.into()),
             SearchableEntityId::Artist(artist_id) => {
                 hsm_ipc::SearchResult::Artist(artist_id.into())
+            }
+            SearchableEntityId::Playlist(playlist_id) => {
+                hsm_ipc::SearchResult::Playlist(playlist_id.into())
             }
         }
     }

@@ -4,7 +4,10 @@ use nucleo_matcher::{Matcher, Utf32String, pattern::Pattern};
 
 use crate::database::{
     DatabaseHandle,
-    store::{AlbumId, ArtistId, DatabaseStore, MissingDatabaseId, SongId, TrackGroupId, TrackId},
+    store::{
+        AlbumId, ArtistId, DatabaseStore, MissingDatabaseId, PlaylistId, SongId, TrackGroupId,
+        TrackId,
+    },
 };
 
 pub enum SearchableEntityId {
@@ -13,6 +16,7 @@ pub enum SearchableEntityId {
     Song(SongId),
     Album(AlbumId),
     Artist(ArtistId),
+    Playlist(PlaylistId),
 }
 
 impl DatabaseStore {
@@ -135,6 +139,12 @@ impl DatabaseStore {
             .collect();
         items.extend(self.get_track_or_song_ids()?);
         items.extend(self.get_track_group_or_album_ids()?);
+        items.extend(self.playlists.iter().map(|(playlist_id, playlist)| {
+            (
+                SearchableEntityId::Playlist(playlist_id),
+                Utf32String::from(playlist.title.as_str()),
+            )
+        }));
 
         Ok(items)
     }

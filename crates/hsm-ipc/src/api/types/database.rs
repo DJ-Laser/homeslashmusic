@@ -182,6 +182,45 @@ pub struct Artist {
     pub genres: Vec<String>,
 }
 
+/// The databse identifier for a `Playlist`
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlaylistId(pub u64);
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum PlaylistSource {
+    LocalFile(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PlaylistEntry {
+    /// Play the specified track
+    Track(TrackId),
+    /// Play the preferred track for the song
+    Song(SongId),
+    /// Play the specified track group
+    TrackGroup(TrackGroupId),
+    /// Play the preferred track group for the album
+    Album(AlbumId),
+    /// Play the contents of the playlist
+    Playlist(PlaylistId),
+}
+
+/// The database data for a `Playlist`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Playlist {
+    /// The source of this playlist
+    pub source: PlaylistSource,
+    /// All entries in the playlist, sorted by play order
+    pub entries: Vec<PlaylistEntry>,
+
+    /// The name of this track
+    pub title: Option<String>,
+
+    /// The genres associated with this artist, sorted by relevance
+    pub genres: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SearchResult {
     Track(TrackId),
@@ -189,6 +228,7 @@ pub enum SearchResult {
     TrackGroup(TrackGroupId),
     Album(AlbumId),
     Artist(ArtistId),
+    Playlist(PlaylistId),
 }
 
 impl TryFrom<SearchResult> for InsertItem {
@@ -201,6 +241,7 @@ impl TryFrom<SearchResult> for InsertItem {
             SearchResult::TrackGroup(track_group_id) => Ok(InsertItem::TrackGroup(track_group_id)),
             SearchResult::Album(album_id) => Ok(InsertItem::Album(album_id)),
             SearchResult::Artist(artist_id) => Err(SearchResult::Artist(artist_id)),
+            SearchResult::Playlist(playlist_id) => Ok(InsertItem::Playlist(playlist_id)),
         }
     }
 }

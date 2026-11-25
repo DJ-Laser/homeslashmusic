@@ -2,7 +2,7 @@ use std::{fmt::Display, time::Duration};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{AlbumId, SongId, TrackGroupId, TrackId};
+use crate::{AlbumId, PlaylistId, SongId, TrackGroupId, TrackId};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InsertItem {
@@ -15,7 +15,7 @@ pub enum InsertItem {
     /// Insert the preferred track group for the album
     Album(AlbumId),
     // /// Insert the contents of the playlist
-    // Playlist(PlaylistId),
+    Playlist(PlaylistId),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

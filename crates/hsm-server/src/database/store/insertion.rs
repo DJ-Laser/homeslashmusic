@@ -16,6 +16,8 @@ pub enum InsertItemError {
     SongNoTracks(SongId),
     #[error("Album {0} has no track groups to load")]
     AlbumNoTrackGroups(AlbumId),
+    #[error("Playlists are not yet supported")]
+    PlaylistsUnsupported,
 }
 
 impl DatabaseStore {
@@ -122,6 +124,9 @@ impl DatabaseStore {
                 let track_group = self.get_track_group(track_group_id)?;
 
                 self.queue_many_metadata(track_group.derived.tracks())?
+            }
+            InsertItem::Playlist(_) => {
+                return Err(InsertItemError::PlaylistsUnsupported);
             }
         };
 

@@ -63,7 +63,7 @@ pub struct PlaylistData {
     pub derived: DerivedPlaylistData,
 
     /// Name of the playlist
-    pub name: String,
+    pub title: String,
     /// The genres associated with this playlist, sorted by relevance
     pub genres: Vec<String>,
 }
