@@ -1,4 +1,4 @@
-mod jobs;
+mod musicbrainz;
 mod persistence;
 mod sources;
 mod store;
@@ -10,7 +10,7 @@ use std::{
 
 use log::{error, info, warn};
 use smol::{
-    Executor, Task,
+    Executor,
     channel::{self},
 };
 use thiserror::Error;
@@ -18,15 +18,13 @@ use thiserror::Error;
 use crate::{
     config::database::DatabaseConfig,
     database::{
-        jobs::JobContext,
         persistence::{AutosaveTask, SaveDbError, load_db, save_db, start_autosave_task},
-        store::{DatabaseStore, fetch_incomplete_mbids},
+        store::{DatabaseStore, MissingDatabaseId, fetch_incomplete_mbids},
     },
 };
 
 pub use persistence::LoadDbError;
 pub use sources::TrackLocation;
-pub use store::run_search;
 
 #[derive(Debug, Error)]
 pub enum ReloadConfigError {
@@ -52,10 +50,6 @@ struct MusicDatabase {
 pub struct DatabaseHandle(Arc<MusicDatabase>);
 
 impl DatabaseHandle {
-    fn ctx(&self, executor: Arc<Executor<'static>>) -> JobContext {
-        JobContext::new(executor, self.clone())
-    }
-
     fn read_config<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&DatabaseConfig) -> R,
@@ -86,16 +80,11 @@ impl DatabaseHandle {
         ret
     }
 
-    pub fn run_job<F, R>(
-        &self,
-        executor: &Arc<Executor<'static>>,
-        job: impl FnOnce(JobContext) -> F,
-    ) -> Task<R>
+    fn write_db<F, R>(&self, f: F) -> R
     where
-        F: Future<Output = R> + Send + 'static,
-        R: Send + 'static,
+        F: FnOnce(&mut DatabaseStore) -> R,
     {
-        executor.spawn(job(self.ctx(executor.clone())))
+        self.write_state(|state| f(&mut state.store))
     }
 
     pub async fn reload_config(&self, new_config: DatabaseConfig) -> Result<(), ReloadConfigError> {
@@ -130,8 +119,15 @@ impl DatabaseHandle {
         Ok(())
     }
 
-    pub fn update(&self, executor: &Arc<Executor<'static>>) -> Task<()> {
-        self.run_job(executor, sources::update_sources)
+    pub async fn update(&self, executor: Arc<Executor<'static>>) {
+        sources::update_sources(executor, self.clone()).await;
+    }
+
+    pub async fn search(
+        &self,
+        search_query: String,
+    ) -> Result<Vec<(store::SearchableEntityId, u32)>, MissingDatabaseId> {
+        store::run_search(self, search_query).await
     }
 }
 
@@ -149,8 +145,8 @@ fn start_database(
         autosave_wake_tx: autosave_wake_tx.clone(),
     }));
 
-    handle
-        .run_job(executor, |ctx| fetch_incomplete_mbids(ctx, mbid_wake_rx))
+    executor
+        .spawn(fetch_incomplete_mbids(handle.clone(), mbid_wake_rx))
         .detach();
 
     let autosaver = start_autosave_task(

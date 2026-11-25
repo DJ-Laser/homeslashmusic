@@ -15,7 +15,7 @@ use musicbrainz_rs::{
 use thiserror::Error;
 
 use crate::database::{
-    jobs::JobContext,
+    DatabaseHandle,
     store::{
         AlbumData, AlbumId, ArtistData, ArtistId, DatabaseStore, DerivedAlbumData,
         DerivedArtistData, DerivedSongData, MissingDatabaseId, MusicBrainzId, SongData, SongId,
@@ -101,12 +101,12 @@ fn insert_artist(
 }
 
 pub async fn fetch_artist(
-    ctx: &JobContext,
+    handle: &DatabaseHandle,
     mbid: MusicBrainzId,
 ) -> Result<(), MusicBrainzFetchError> {
     let mb_artist = fetch_rate_limited(&mbid, Artist::fetch().with_genres()).await?;
 
-    ctx.write_db(|db| insert_artist(db, mbid, mb_artist, true))?;
+    handle.write_db(|db| insert_artist(db, mbid, mb_artist, true))?;
 
     Ok(())
 }
@@ -175,13 +175,13 @@ fn insert_album(
 }
 
 pub async fn fetch_release_group(
-    ctx: &JobContext,
+    handle: &DatabaseHandle,
     mbid: MusicBrainzId,
 ) -> Result<(), MusicBrainzFetchError> {
     let mb_release_group =
         fetch_rate_limited(&mbid, ReleaseGroup::fetch().with_genres().with_artists()).await?;
 
-    ctx.write_db(|db| insert_album(db, mbid, mb_release_group, true))?;
+    handle.write_db(|db| insert_album(db, mbid, mb_release_group, true))?;
 
     Ok(())
 }
@@ -255,7 +255,7 @@ fn get_mix_songs(
 }
 
 pub async fn fetch_recording(
-    ctx: &JobContext,
+    handle: &DatabaseHandle,
     mbid: MusicBrainzId,
 ) -> Result<(), MusicBrainzFetchError> {
     let mb_recording = fetch_rate_limited(
@@ -267,7 +267,7 @@ pub async fn fetch_recording(
     )
     .await?;
 
-    ctx.write_db(|db| insert_song(db, mbid, mb_recording, true))?;
+    handle.write_db(|db| insert_song(db, mbid, mb_recording, true))?;
 
     Ok(())
 }

@@ -55,6 +55,8 @@ impl DerivedTrackData {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrackData {
+    /// The name of the this track's provider
+    pub provider: String,
     /// The location of this track's audio data
     pub location: TrackLocation,
     /// Track data derrived other database entries

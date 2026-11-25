@@ -8,8 +8,7 @@ use smol::stream::StreamExt as _;
 use thiserror::Error;
 
 use crate::database::{
-    jobs::JobContext,
-    sources::{ArtistLocation, TrackGroupLocation, TrackLocation},
+    sources::{ArtistLocation, TrackGroupLocation, TrackLocation, UpdateContext},
     store::{
         AlbumData, AlbumId, ArtistData, ArtistId, DerivedAlbumData, DerivedArtistData,
         DerivedSongData, DerivedTrackData, DerivedTrackGroupData, MbidQueryType, MissingDatabaseId,
@@ -50,7 +49,7 @@ async fn parse_file_tags(path: PathBuf) -> Result<(Duration, Option<Tag>), LoadF
     .await
 }
 
-fn get_artists(ctx: &JobContext, tag: &Tag, album: bool) -> Vec<ArtistId> {
+fn get_artists(ctx: &UpdateContext, tag: &Tag, album: bool) -> Vec<ArtistId> {
     let (artist_key, multi_artist_key, multi_mbid_key) = if album {
         (
             ItemKey::AlbumArtist,
@@ -158,7 +157,7 @@ fn parse_song_length(input: &str) -> Option<Duration> {
     Some(Duration::from_secs(total_secs))
 }
 
-fn get_song(ctx: &JobContext, tag: &Tag) -> Option<SongId> {
+fn get_song(ctx: &UpdateContext, tag: &Tag) -> Option<SongId> {
     let mbid = MusicBrainzId::parse_str(tag.get_string(ItemKey::MusicBrainzRecordingId)?).ok()?;
 
     if let Some(id) = ctx.read_db(|db| db.lookup_song(&mbid)) {
@@ -193,7 +192,7 @@ fn get_song(ctx: &JobContext, tag: &Tag) -> Option<SongId> {
     Some(song)
 }
 
-fn get_album(ctx: &JobContext, tag: &Tag) -> Option<AlbumId> {
+fn get_album(ctx: &UpdateContext, tag: &Tag) -> Option<AlbumId> {
     let mbid =
         MusicBrainzId::parse_str(tag.get_string(ItemKey::MusicBrainzReleaseGroupId)?).ok()?;
 
@@ -224,7 +223,7 @@ fn get_album(ctx: &JobContext, tag: &Tag) -> Option<AlbumId> {
     Some(album)
 }
 
-fn get_track_group(ctx: &JobContext, tag: &Tag) -> Option<TrackGroupId> {
+fn get_track_group(ctx: &UpdateContext, tag: &Tag) -> Option<TrackGroupId> {
     let title: String = tag.album().map(Into::into)?;
     let location_artist: String = tag
         .get_string(ItemKey::AlbumArtist)
@@ -247,6 +246,7 @@ fn get_track_group(ctx: &JobContext, tag: &Tag) -> Option<TrackGroupId> {
 
     let album = ctx.write_db(|db| {
         db.insert_track_group(TrackGroupData {
+            provider: ctx.provider.clone(),
             location,
             derived: DerivedTrackGroupData::default(),
 
@@ -308,7 +308,7 @@ fn get_replay_gain(tag: &Tag) -> ReplayGain {
     }
 }
 
-async fn load_file(ctx: JobContext, path: PathBuf) -> Result<TrackId, LoadFileError> {
+async fn load_file(ctx: UpdateContext, path: PathBuf) -> Result<TrackId, LoadFileError> {
     let location = TrackLocation::LocalFile(path.clone());
 
     let (length, Some(ref tag)) = parse_file_tags(path.clone()).await? else {
@@ -325,6 +325,7 @@ async fn load_file(ctx: JobContext, path: PathBuf) -> Result<TrackId, LoadFileEr
 
     let track = ctx.write_db(|db| {
         db.update_or_insert_track(TrackData {
+            provider: ctx.provider.clone(),
             location,
             derived: DerivedTrackData::default(),
 
@@ -350,7 +351,7 @@ async fn load_file(ctx: JobContext, path: PathBuf) -> Result<TrackId, LoadFileEr
     Ok(track)
 }
 
-async fn search_directory(ctx: JobContext, path: PathBuf) -> Vec<(PathBuf, LoadFileError)> {
+async fn search_directory(ctx: UpdateContext, path: PathBuf) -> Vec<(PathBuf, LoadFileError)> {
     let mut entries = match smol::fs::read_dir(&path).await {
         Ok(files) => files,
         Err(error) => {
@@ -381,7 +382,7 @@ async fn search_directory(ctx: JobContext, path: PathBuf) -> Vec<(PathBuf, LoadF
 }
 
 fn search_file_or_directory(
-    ctx: JobContext,
+    ctx: UpdateContext,
     path: PathBuf,
 ) -> impl Future<Output = Vec<(PathBuf, LoadFileError)>> + Send {
     Box::pin(async move {
@@ -403,6 +404,6 @@ fn search_file_or_directory(
     })
 }
 
-pub async fn load_all_from_path(ctx: JobContext, path: PathBuf) {
+pub async fn load_all_from_path(ctx: UpdateContext, path: PathBuf) {
     search_file_or_directory(ctx, path).await;
 }

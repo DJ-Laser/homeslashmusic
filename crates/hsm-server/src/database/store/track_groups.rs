@@ -46,6 +46,8 @@ impl DerivedTrackGroupData {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrackGroupData {
+    /// The name of the this track group's provider
+    pub provider: String,
     /// The location of this track group
     pub location: TrackGroupLocation,
     /// Track group data derrived other database entries

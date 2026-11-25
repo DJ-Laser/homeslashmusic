@@ -3,7 +3,7 @@ use std::{cmp, collections::HashSet};
 use nucleo_matcher::{Matcher, Utf32String, pattern::Pattern};
 
 use crate::database::{
-    jobs::JobContext,
+    DatabaseHandle,
     store::{AlbumId, ArtistId, DatabaseStore, MissingDatabaseId, SongId, TrackGroupId, TrackId},
 };
 
@@ -141,7 +141,7 @@ impl DatabaseStore {
 }
 
 pub async fn run_search(
-    ctx: JobContext,
+    handle: &DatabaseHandle,
     search_query: String,
 ) -> Result<Vec<(SearchableEntityId, u32)>, MissingDatabaseId> {
     use nucleo_matcher::pattern::{AtomKind, CaseMatching, Normalization};
@@ -154,7 +154,7 @@ pub async fn run_search(
         AtomKind::Fuzzy,
     );
 
-    let items = ctx.read_db(DatabaseStore::get_searchable_entities)?;
+    let items = handle.read_db(DatabaseStore::get_searchable_entities)?;
 
     let mut scores: Vec<_> = items
         .into_iter()

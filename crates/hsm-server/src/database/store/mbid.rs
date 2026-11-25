@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use smol::channel::Receiver;
 
 use crate::database::{
-    jobs::JobContext,
-    sources::musicbrainz::{fetch_artist, fetch_recording, fetch_release_group},
+    DatabaseHandle,
+    musicbrainz::{fetch_artist, fetch_recording, fetch_release_group},
     store::DatabaseStore,
 };
 
@@ -84,10 +84,10 @@ impl DatabaseStore {
     }
 }
 
-pub async fn fetch_incomplete_mbids(ctx: JobContext, waker: Receiver<()>) {
+pub async fn fetch_incomplete_mbids(handle: DatabaseHandle, waker: Receiver<()>) {
     loop {
         let Some((mbid, query_type)) =
-            ctx.write_db(|db| db.mbid_query_state.claim_next_incomplete())
+            handle.write_db(|db| db.mbid_query_state.claim_next_incomplete())
         else {
             if waker.recv().await.is_err() {
                 break;
@@ -97,19 +97,19 @@ pub async fn fetch_incomplete_mbids(ctx: JobContext, waker: Receiver<()>) {
         };
 
         let guard = DropGuard::new((), |()| {
-            ctx.write_db(|db| db.mbid_query_state.unclaim(mbid));
+            handle.write_db(|db| db.mbid_query_state.unclaim(mbid));
         });
 
         let result = match query_type {
-            MbidQueryType::Recording => fetch_recording(&ctx, mbid).await,
-            MbidQueryType::ReleaseGroup => fetch_release_group(&ctx, mbid).await,
-            MbidQueryType::Artist => fetch_artist(&ctx, mbid).await,
+            MbidQueryType::Recording => fetch_recording(&handle, mbid).await,
+            MbidQueryType::ReleaseGroup => fetch_release_group(&handle, mbid).await,
+            MbidQueryType::Artist => fetch_artist(&handle, mbid).await,
         };
 
         match result {
-            Ok(()) => ctx.write_db(|db| db.complete_mbid_query(mbid)),
+            Ok(()) => handle.write_db(|db| db.complete_mbid_query(mbid)),
             Err(err) => {
-                ctx.write_db(|db| db.mbid_query_state.fail(mbid));
+                handle.write_db(|db| db.mbid_query_state.fail(mbid));
                 error!("Failed to fetch musicbrainz: {err}");
             }
         }

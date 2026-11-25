@@ -18,7 +18,7 @@ use smol::{
 };
 use thiserror::Error;
 
-use crate::{AppHandle, audio::PlayerError, database, ipc::IpcServerError::ListenerClosed};
+use crate::{AppHandle, audio::PlayerError, ipc::IpcServerError::ListenerClosed};
 
 #[derive(Debug, Error)]
 pub enum IpcServerError {
@@ -327,7 +327,11 @@ impl RequestHandler for AppHandle {
         &self,
         _request: requests::UpdateDatabase,
     ) -> Result<(), hsm_ipc::Error> {
-        self.database.update(&self.executor).detach();
+        let executor = self.executor.clone();
+        let handle = self.database.clone();
+        self.executor
+            .spawn(async move { handle.update(executor).await })
+            .detach();
 
         Ok(())
     }
@@ -338,9 +342,7 @@ impl RequestHandler for AppHandle {
     ) -> Result<Vec<(SearchResult, u32)>, hsm_ipc::Error> {
         let search_result = self
             .database
-            .run_job(&self.executor, |ctx| {
-                database::run_search(ctx, search_query)
-            })
+            .search(search_query)
             .await
             .map_err(|error| hsm_ipc::Error::Server(error.to_string()))?;
 
