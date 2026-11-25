@@ -1,9 +1,12 @@
-use std::{collections::HashMap, io, iter, ops::ControlFlow, path::PathBuf, time::Duration};
+use std::{
+    collections::HashMap, env::home_dir, io, iter, ops::ControlFlow, path::PathBuf, time::Duration,
+};
 
 use lofty::{
     file::{AudioFile, TaggedFileExt},
     tag::{Accessor, ItemKey, Tag},
 };
+use log::error;
 use smol::stream::StreamExt as _;
 use thiserror::Error;
 
@@ -390,8 +393,18 @@ async fn search_directory(ctx: UpdateContext, path: PathBuf) -> Vec<(PathBuf, Lo
 
 fn search_file_or_directory(
     ctx: UpdateContext,
-    path: PathBuf,
+    unexpanded_path: PathBuf,
 ) -> impl Future<Output = Vec<(PathBuf, LoadFileError)>> + Send {
+    let path = if let Ok(relative_path) = unexpanded_path.strip_prefix("~") {
+        if let Some(home_dir) = home_dir() {
+            home_dir.join(relative_path)
+        } else {
+            unexpanded_path
+        }
+    } else {
+        unexpanded_path
+    };
+
     Box::pin(async move {
         let metadata = match smol::fs::metadata(&path).await {
             Ok(metadata) => metadata,
@@ -412,5 +425,8 @@ fn search_file_or_directory(
 }
 
 pub async fn load_all_from_path(ctx: UpdateContext, path: PathBuf) {
-    search_file_or_directory(ctx, path).await;
+    let errors = search_file_or_directory(ctx, path).await;
+    for (path, error) in errors {
+        error!("Failed to load {}: {error}", path.display());
+    }
 }

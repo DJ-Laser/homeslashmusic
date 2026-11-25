@@ -111,6 +111,7 @@ fn main() -> ExitCode {
     env_logger::builder()
         .filter_level(log::LevelFilter::Info)
         .filter_module("symphonia", log::LevelFilter::Warn)
+        .filter_module("lofty", log::LevelFilter::Error)
         .init();
 
     let executor: Arc<Executor<'static>> = Arc::new(Executor::new());
