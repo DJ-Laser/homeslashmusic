@@ -1,4 +1,4 @@
-use std::{io, iter, path::PathBuf, time::Duration};
+use std::{io, iter, ops::ControlFlow, path::PathBuf, time::Duration};
 
 use lofty::{
     file::{AudioFile, TaggedFileExt},
@@ -223,7 +223,7 @@ fn get_album(ctx: &UpdateContext, tag: &Tag) -> Option<AlbumId> {
     Some(album)
 }
 
-fn get_track_group(ctx: &UpdateContext, tag: &Tag) -> Option<TrackGroupId> {
+async fn get_track_group(ctx: &UpdateContext, tag: &Tag) -> Option<TrackGroupId> {
     let title: String = tag.album().map(Into::into)?;
     let location_artist: String = tag
         .get_string(ItemKey::AlbumArtist)
@@ -231,13 +231,15 @@ fn get_track_group(ctx: &UpdateContext, tag: &Tag) -> Option<TrackGroupId> {
         .map(Into::into)?;
 
     let location = TrackGroupLocation::LocalTags {
+        provider: ctx.provider().clone(),
         title: title.clone(),
         artist: location_artist,
     };
 
-    if let Some(id) = ctx.read_db(|db| db.lookup_track_group(&location)) {
-        return Some(id);
-    }
+    let guard = match ctx.mark_track_group(location).await {
+        ControlFlow::Continue(location) => location,
+        ControlFlow::Break(id) => return Some(id),
+    };
 
     let album = get_album(ctx, tag);
     let artists = get_artists(ctx, tag, true);
@@ -246,8 +248,8 @@ fn get_track_group(ctx: &UpdateContext, tag: &Tag) -> Option<TrackGroupId> {
 
     let album = ctx.write_db(|db| {
         db.insert_track_group(TrackGroupData {
-            provider: ctx.provider.clone(),
-            location,
+            provider: ctx.provider().clone(),
+            location: guard.location,
             derived: DerivedTrackGroupData::default(),
 
             album,
@@ -311,12 +313,17 @@ fn get_replay_gain(tag: &Tag) -> ReplayGain {
 async fn load_file(ctx: UpdateContext, path: PathBuf) -> Result<TrackId, LoadFileError> {
     let location = TrackLocation::LocalFile(path.clone());
 
+    let guard = match ctx.mark_track(location).await {
+        ControlFlow::Continue(location) => location,
+        ControlFlow::Break(id) => return Ok(id),
+    };
+
     let (length, Some(ref tag)) = parse_file_tags(path.clone()).await? else {
         return Err(LoadFileError::MissingTags);
     };
 
     let song = get_song(&ctx, tag);
-    let track_group = get_track_group(&ctx, tag);
+    let track_group = get_track_group(&ctx, tag).await;
 
     let title = tag.title().map(Into::into);
     let track_number = tag.track();
@@ -325,8 +332,8 @@ async fn load_file(ctx: UpdateContext, path: PathBuf) -> Result<TrackId, LoadFil
 
     let track = ctx.write_db(|db| {
         db.update_or_insert_track(TrackData {
-            provider: ctx.provider.clone(),
-            location,
+            provider: ctx.provider().clone(),
+            location: guard.location,
             derived: DerivedTrackData::default(),
 
             song,

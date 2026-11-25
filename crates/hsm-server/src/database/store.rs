@@ -25,7 +25,7 @@ pub use track_groups::*;
 pub use tracks::*;
 
 use crate::database::sources::{
-    ArtistLocation, PlaylistLocation, TrackGroupLocation, TrackLocation,
+    ArtistLocation, PlaylistLocation, TrackGroupLocation, TrackLocation, UpdateState,
 };
 
 #[derive(Error, Debug)]
@@ -242,5 +242,11 @@ impl DatabaseStore {
         }
 
         println!();
+    }
+
+    pub fn purge_post_update(&mut self, state: &UpdateState) {
+        let _ = state;
+        let _ = self;
+        //TODO
     }
 }

@@ -1,24 +1,69 @@
-pub mod local_files;
+mod context;
+mod local_files;
 
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Display,
+    hash::Hash,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 
 use log::info;
 use serde::{Deserialize, Serialize};
 use smol::Executor;
 
 use crate::{
-    config::database::{DatabaseConfig, LocalSourceConfig, ProviderConfig, SourceConfig},
-    database::{DatabaseHandle, store::DatabaseStore},
+    config::database::{LocalSourceConfig, ProviderConfig, SourceConfig},
+    database::{
+        DatabaseHandle,
+        sources::context::{MarkedEntity, UpdateContext},
+    },
 };
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ProviderId(String);
+
+impl Display for ProviderId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TrackLocation {
     LocalFile(PathBuf),
 }
 
+impl Display for TrackLocation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TrackLocation::LocalFile(path) => write!(f, "{}", path.display()),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TrackGroupLocation {
-    LocalTags { title: String, artist: String },
+    LocalTags {
+        provider: ProviderId,
+        title: String,
+        artist: String,
+    },
+}
+
+impl Display for TrackGroupLocation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TrackGroupLocation::LocalTags {
+                provider: _,
+                title,
+                artist,
+            } => {
+                write!(f, "Local {title} - {artist}")
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -26,52 +71,42 @@ pub enum ArtistLocation {
     LocalTags { name: String },
 }
 
+impl Display for ArtistLocation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ArtistLocation::LocalTags { name } => {
+                write!(f, "Local {name}")
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PlaylistLocation {
     LocalFile(PathBuf),
 }
 
-#[derive(Debug, Clone)]
-pub struct UpdateContext {
-    pub executor: Arc<Executor<'static>>,
-    pub handle: DatabaseHandle,
-    pub provider: String,
+impl Display for PlaylistLocation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PlaylistLocation::LocalFile(path) => write!(f, "{}", path.display()),
+        }
+    }
 }
 
-impl UpdateContext {
-    /// Spawn a new task that runs in parallel to the current task.
-    /// Dropping this future will cancel it.
-    pub fn spawn<F>(&self, fut: F) -> impl Future<Output = F::Output>
-    where
-        F: Future + Send + 'static,
-        F::Output: Send,
-    {
-        self.executor.spawn(fut)
-    }
+#[derive(Debug, Default)]
+pub struct UpdateState {
+    /// The subset of providers that were updated
+    /// If a full update was done, this will be None
+    pub updated_providers: Option<Vec<ProviderId>>,
 
-    /// Synchronously read from the database
-    pub fn read_db<F, R>(&self, f: F) -> R
-    where
-        F: FnOnce(&DatabaseStore) -> R,
-    {
-        self.handle.read_db(f)
-    }
+    pub seen_tracks: HashMap<TrackLocation, MarkedEntity>,
+    pub seen_track_groups: HashMap<TrackGroupLocation, MarkedEntity>,
+    pub seen_playlists: HashMap<PlaylistLocation, MarkedEntity>,
 
-    /// Synchronously read from the database
-    pub fn read_config<F, R>(&self, f: F) -> R
-    where
-        F: FnOnce(&DatabaseConfig) -> R,
-    {
-        self.handle.read_config(|config| f(config))
-    }
-
-    /// Synchronously write to the database
-    pub fn write_db<F, R>(&self, f: F) -> R
-    where
-        F: FnOnce(&mut DatabaseStore) -> R,
-    {
-        self.handle.write_state(|state| f(&mut state.store))
-    }
+    // Failed providers shouldn't have their unseen entities purged
+    // For example, if an online provider is used when there is no wifi
+    pub failed_providers: HashSet<ProviderId>,
 }
 
 pub async fn update_source(ctx: UpdateContext, source: SourceConfig) {
@@ -88,20 +123,24 @@ pub async fn update_sources(executor: Arc<Executor<'static>>, handle: DatabaseHa
 
     let providers = handle.read_config(|config| config.providers.clone());
 
+    let state = Arc::new(Mutex::new(UpdateState::default()));
+
     for (name, ProviderConfig { sources }) in providers {
         info!("Updating sources for provider {name}");
+        let ctx = UpdateContext::new(
+            ProviderId(name.clone()),
+            executor.clone(),
+            handle.clone(),
+            state.clone(),
+        );
+
         for source in sources {
-            update_source(
-                UpdateContext {
-                    executor: executor.clone(),
-                    handle: handle.clone(),
-                    provider: name.clone(),
-                },
-                source,
-            )
-            .await;
+            update_source(ctx.clone(), source).await;
         }
     }
 
-    info!("Finished databse update");
+    let final_state = std::mem::take(&mut *state.lock().unwrap());
+    handle.write_db(|db| db.purge_post_update(&final_state));
+
+    info!("Finished database update");
 }

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use slotmap::DenseSlotMap;
 
 use crate::database::{
-    sources::TrackGroupLocation,
+    sources::{ProviderId, TrackGroupLocation},
     store::{
         AlbumData, AlbumId, ArtistData, ArtistId, DatabaseStore, Lookup, MissingDatabaseId,
         PlaylistId, TrackId,
@@ -47,7 +47,7 @@ impl DerivedTrackGroupData {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrackGroupData {
     /// The name of the this track group's provider
-    pub provider: String,
+    pub provider: ProviderId,
     /// The location of this track group
     pub location: TrackGroupLocation,
     /// Track group data derrived other database entries
