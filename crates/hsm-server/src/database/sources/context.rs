@@ -1,7 +1,7 @@
 #![expect(dead_code)]
 
 use std::{
-    collections::{HashMap, HashSet, hash_map},
+    collections::{HashMap, hash_map},
     fmt::Display,
     hash::Hash,
     ops::ControlFlow,

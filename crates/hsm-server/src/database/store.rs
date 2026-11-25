@@ -11,7 +11,7 @@ mod tracks;
 
 use std::collections::HashMap;
 
-use log::{error, info};
+use log::error;
 use serde::{Deserialize, Serialize};
 use slotmap::DenseSlotMap;
 use thiserror::Error;
