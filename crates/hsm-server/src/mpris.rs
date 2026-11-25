@@ -25,6 +25,10 @@ pub enum MprisServerError {
     EventChannelClosed,
 }
 
+#[cfg(debug_assertions)]
+pub const BUS_NAME_SUFFIX: &str = "dev.djlaser.HomeSlashMusic-debug";
+
+#[cfg(not(debug_assertions))]
 pub const BUS_NAME_SUFFIX: &str = "dev.djlaser.HomeSlashMusic";
 
 async fn on_event(event: Event, server: &Server<MprisImpl>) -> Result<(), MprisServerError> {
