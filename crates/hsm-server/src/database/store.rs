@@ -11,7 +11,6 @@ mod tracks;
 
 use std::collections::HashMap;
 
-use log::error;
 use serde::{Deserialize, Serialize};
 use slotmap::DenseSlotMap;
 use thiserror::Error;
@@ -307,15 +306,7 @@ impl DatabaseStore {
             self.remove_artist(id);
         }
 
-        if let Err(errors) = self.verify_integrity() {
-            for err in &errors {
-                error!("Database integrity violation: {err}");
-            }
-            error!(
-                "DatabaseStore integrity check failed ({} errors)",
-                errors.len()
-            );
-        }
+        self.check_integrity();
     }
 
     pub fn purge_post_update(&mut self, state: &UpdateState) {
@@ -394,6 +385,8 @@ impl DatabaseStore {
 }
 
 mod integrity {
+    use log::error;
+
     use crate::database::store::{DatabaseStore, PlaylistEntry};
 
     #[derive(Debug, thiserror::Error)]
@@ -406,7 +399,7 @@ mod integrity {
     impl DatabaseStore {
         /// Verifies all relational foreign keys, `derived` reverse lists, and `lookup` indexes.
         #[expect(clippy::too_many_lines, reason = "Test code")]
-        pub fn verify_integrity(&self) -> Result<(), Vec<IntegrityError>> {
+        fn find_integrity_errors(&self) -> Vec<IntegrityError> {
             let mut errors = Vec::new();
             let mut push_err = |entity: &'static str, reason: String| {
                 errors.push(IntegrityError { entity, reason });
@@ -1121,10 +1114,21 @@ mod integrity {
                     );
                 }
             }
-            if errors.is_empty() {
-                Ok(())
-            } else {
-                Err(errors)
+
+            errors
+        }
+
+        pub fn check_integrity(&self) {
+            let errors = self.find_integrity_errors();
+
+            if !errors.is_empty() {
+                for err in &errors {
+                    error!("Database integrity violation: {err}");
+                }
+                error!(
+                    "DatabaseStore integrity check failed ({} errors)",
+                    errors.len()
+                );
             }
         }
     }

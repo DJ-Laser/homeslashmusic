@@ -137,6 +137,8 @@ fn start_database(
     store: DatabaseStore,
     config: DatabaseConfig,
 ) -> (DatabaseHandle, AutosaveTask) {
+    store.check_integrity();
+
     let (mbid_wake_tx, mbid_wake_rx) = channel::bounded(1);
     let (autosave_wake_tx, autosave_wake_rx) = channel::bounded(1);
 
