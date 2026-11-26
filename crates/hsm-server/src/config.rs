@@ -13,6 +13,8 @@ use log::{error, info};
 
 use crate::config::{database::DatabaseConfig, player::PlayerConfig};
 
+pub const DEFAULT_CONFIG_KDL: &str = include_str!("../default-config.kdl");
+
 pub static PARSE_CONFIG: LazyLock<ParseConfig> = LazyLock::new(|| ParseConfig {
     default_placement: kdl_config::DefaultPlacement::Exhaustive,
     default_bool: kdl_config::BoolMode::PresenceAndValue,
@@ -44,8 +46,7 @@ fn parse_config_sync(path: &Path) -> Result<HsmServerConfig, Box<KdlConfigError>
             })?;
         }
 
-        let default_config = kdl_config::to_kdl_document(&HsmServerConfig::default(), "config");
-        fs::write(path, default_config).map_err(|err| {
+        fs::write(path, DEFAULT_CONFIG_KDL).map_err(|err| {
             Box::new(KdlConfigError::custom(
                 "KDL file",
                 format!("failed to write {}: {err}", path.display()),
@@ -81,11 +82,21 @@ pub fn config_file_path() -> Result<PathBuf, Box<KdlConfigError>> {
 
 #[derive(Debug, Clone, PartialEq, KdlNode)]
 #[kdl(node = "config", rename_all = "kebab-case")]
-#[derive(Default)]
 pub struct HsmServerConfig {
     #[kdl(child, default)]
     pub database: DatabaseConfig,
 
     #[kdl(child, default)]
     pub player: PlayerConfig,
+}
+
+#[cfg(test)]
+mod test {
+    use crate::config::{DEFAULT_CONFIG_KDL, PARSE_CONFIG};
+
+    #[test]
+    fn default_config_parses() {
+        kdl_config::parse_config_with_config(DEFAULT_CONFIG_KDL, &PARSE_CONFIG)
+            .expect("bundled default-config.kdl must always be valid");
+    }
 }

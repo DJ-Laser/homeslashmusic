@@ -1,0 +1,17 @@
+database {
+    // Leave unset to use the default XDG path
+    /-path "~/homeslashmusic.db"
+
+    provider "Local Files" {
+        local "~/Music"
+    }
+}
+
+player {
+    // Uncomment to enable ReplayGain volume normalization
+    /-replay-gain "auto" {
+        preamp 0.0
+        fallback-preamp -7.0
+        limit-clipping #true
+    }
+}
