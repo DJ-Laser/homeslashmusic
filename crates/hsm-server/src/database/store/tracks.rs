@@ -38,6 +38,45 @@ pub struct ReplayGain {
     pub album_peak: Option<f32>,
 }
 
+impl ReplayGain {
+    fn get_values(
+        preferred_gain: Option<f32>,
+        preferred_peak: Option<f32>,
+        fallback_gain: Option<f32>,
+        fallback_peak: Option<f32>,
+    ) -> Option<(f32, Option<f32>)> {
+        let (gain, peak) = if let Some(gain) = preferred_gain {
+            (gain, preferred_peak)
+        } else {
+            let gain = fallback_gain?;
+            (gain, fallback_peak)
+        };
+
+        let peak = peak.filter(|&p| p > 0.0);
+        Some((gain, peak))
+    }
+
+    /// Get the track `(gain, peak)`, falling back to album values
+    pub fn get_track_values(&self) -> Option<(f32, Option<f32>)> {
+        Self::get_values(
+            self.track_gain,
+            self.track_peak,
+            self.album_gain,
+            self.album_peak,
+        )
+    }
+
+    /// Get the album `(gain, peak)` falling back to track values
+    pub fn get_album_values(&self) -> Option<(f32, Option<f32>)> {
+        Self::get_values(
+            self.album_gain,
+            self.album_peak,
+            self.track_gain,
+            self.track_peak,
+        )
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct DerivedTrackData {
     pub(super) in_playlists: Vec<PlaylistId>,

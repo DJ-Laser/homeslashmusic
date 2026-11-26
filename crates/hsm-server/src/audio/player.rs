@@ -1,6 +1,6 @@
 use std::{
     sync::{
-        Arc,
+        Arc, RwLock,
         atomic::{AtomicUsize, Ordering},
     },
     time::Duration,
@@ -19,12 +19,15 @@ use thiserror::Error;
 use crate::{
     audio::{
         InsertTrackData,
-        controlled_source::{self, Controls, SeekError, SourceEvent, wrap_source},
+        controlled_source::{
+            self, Controls, SeekError, SourceEvent, TrackGainFactors, wrap_source,
+        },
         decoder::{LoadTrackError, TrackDecoder},
         output::{PlayerAudioOutput, SourceQueue, SourceQueueState},
-        track_list::TrackList,
+        track_list::{QueueTrackData, TrackList},
     },
-    database::TrackLocation,
+    config::player::{PlayerConfig, ReplayGainMode},
+    database::ReplayGain,
 };
 
 #[derive(Debug, Error)]
@@ -55,6 +58,8 @@ impl PlayerError {
 
 #[derive(Debug)]
 pub struct Player {
+    config: RwLock<PlayerConfig>,
+
     tracks: TrackList,
     current_track_index: AtomicUsize,
 
@@ -71,22 +76,26 @@ pub struct Player {
 
 impl Player {
     pub fn connect_new(
+        config: PlayerConfig,
         event_tx: async_broadcast::Sender<Event>,
         mixer: &Mixer,
         guard_tx: channel::Sender<()>,
     ) -> Self {
-        let (player, source) = Self::new(event_tx, guard_tx);
+        let (player, source) = Self::new(config, event_tx, guard_tx);
         mixer.add(source);
         player
     }
 
     pub fn new(
+        config: PlayerConfig,
         event_tx: async_broadcast::Sender<Event>,
         guard_tx: channel::Sender<()>,
     ) -> (Self, PlayerAudioOutput) {
         let (source_tx, source_rx) = channel::unbounded();
 
         let player = Self {
+            config: RwLock::new(config),
+
             tracks: TrackList::new(),
             current_track_index: AtomicUsize::new(0),
 
@@ -119,10 +128,46 @@ impl Player {
         }
     }
 
+    pub fn calculate_gain_factors(&self, replay_gain: &ReplayGain) -> (f32, f32) {
+        let Some(ref config) = self.config.read().unwrap().replay_gain else {
+            return (1.0, f32::INFINITY);
+        };
+
+        let use_album = match config.mode {
+            ReplayGainMode::Track => false,
+            ReplayGainMode::Album => true,
+            ReplayGainMode::Auto => !self.shuffle(),
+        };
+
+        let (gain_db, peak) = (if use_album {
+            replay_gain.get_album_values()
+        } else {
+            replay_gain.get_track_values()
+        })
+        .map_or((config.fallback_preamp_db, None), |(gain, peak)| {
+            (gain + config.preamp_db, peak)
+        });
+
+        let factor = 10.0_f32.powf(gain_db / 20.0);
+        let max_factor = if config.limit_clipping {
+            if let Some(peak) = peak
+                && peak > 0.0
+            {
+                1.0 / peak
+            } else {
+                1.0
+            }
+        } else {
+            f32::INFINITY
+        };
+
+        (factor, max_factor)
+    }
+
     /// If `wait_for_empty_queue` is true, this function will loop until the queue become open for replacement
     /// If it is not ensured that the queue is empty beforehand it can cause an infinite loop and lockup
-    async fn queue_track(&self, track: TrackLocation, wait_for_empty_queue: bool) {
-        let decoder = match TrackDecoder::new(track).await {
+    async fn queue_track(&self, track: QueueTrackData, wait_for_empty_queue: bool) {
+        let decoder = match TrackDecoder::new(track.location).await {
             Ok(source) => source,
             Err(error) => {
                 error!("Failed to load track: {error}");
@@ -138,6 +183,7 @@ impl Player {
                         decoder,
                         self.controls.clone(),
                         self.source_tx.clone(),
+                        track.gain_factors,
                     ));
 
                     *source_queue = SourceQueueState::Queued(source);
@@ -191,11 +237,11 @@ impl Player {
         };
 
         if load_necessary {
-            self.queue_track(current_track.location.clone(), true).await;
+            self.queue_track(current_track, true).await;
         }
 
         if let Some(next_track) = next_track {
-            self.queue_track(next_track.location.clone(), false).await;
+            self.queue_track(next_track, false).await;
         }
 
         true
@@ -370,6 +416,8 @@ impl Player {
             let current_index = self.current_track_index.load(Ordering::Acquire);
             let new_index = self.tracks.set_shuffle(shuffle, current_index);
 
+            self.refresh_replay_gain();
+
             self.current_track_index.store(new_index, Ordering::Release);
 
             self.emit(Event::ShuffleChanged(shuffle));
@@ -380,7 +428,7 @@ impl Player {
                 if let Some((_, Some(next_track))) =
                     self.tracks.get_tracks_to_queue(current_track_index)
                 {
-                    self.queue_track(next_track.location.clone(), true).await;
+                    self.queue_track(next_track, true).await;
                 }
             }
         }
@@ -477,6 +525,14 @@ impl Player {
     ) -> Result<Option<QueuedTrackId>, PlayerError> {
         let current_index = self.current_track_index.load(Ordering::Acquire);
 
+        let tracks = tracks
+            .into_iter()
+            .map(|track| {
+                let (gain_factor, max_factor) = self.calculate_gain_factors(&track.replay_gain);
+                track.with_gain(Arc::new(TrackGainFactors::new(gain_factor, max_factor)))
+            })
+            .collect();
+
         let (new_current_index, first_id) =
             self.tracks
                 .insert_tracks(current_index, position, tracks, set_as_current)?;
@@ -517,5 +573,22 @@ impl Player {
                 _ => (),
             }
         }
+    }
+
+    pub fn reload_config(&self, new_config: PlayerConfig) {
+        let mut old_config = self.config.write().unwrap();
+
+        let replay_gain_changed = old_config.replay_gain != new_config.replay_gain;
+        *old_config = new_config;
+        drop(old_config);
+
+        if replay_gain_changed {
+            self.refresh_replay_gain();
+        }
+    }
+
+    fn refresh_replay_gain(&self) {
+        self.tracks
+            .update_gain_factors(|replay_gain| self.calculate_gain_factors(replay_gain));
     }
 }

@@ -1,4 +1,5 @@
 pub mod database;
+pub mod player;
 
 use std::{
     env, fs,
@@ -10,7 +11,7 @@ use directories::ProjectDirs;
 use kdl_config::{KdlConfigError, KdlNode, ParseConfig};
 use log::{error, info};
 
-use crate::config::database::DatabaseConfig;
+use crate::config::{database::DatabaseConfig, player::PlayerConfig};
 
 pub static PARSE_CONFIG: LazyLock<ParseConfig> = LazyLock::new(|| ParseConfig {
     default_placement: kdl_config::DefaultPlacement::Exhaustive,
@@ -78,10 +79,13 @@ pub fn config_file_path() -> Result<PathBuf, Box<KdlConfigError>> {
         })
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, KdlNode)]
+#[derive(Debug, Clone, PartialEq, KdlNode)]
 #[kdl(node = "config", rename_all = "kebab-case")]
 #[derive(Default)]
 pub struct HsmServerConfig {
     #[kdl(child, default)]
     pub database: DatabaseConfig,
+
+    #[kdl(child, default)]
+    pub player: PlayerConfig,
 }

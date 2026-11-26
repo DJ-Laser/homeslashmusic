@@ -14,6 +14,8 @@ use thiserror::Error;
 pub use player::{Player, PlayerError};
 pub use track_list::InsertTrackData;
 
+use crate::config::player::PlayerConfig;
+
 #[derive(Debug, Error)]
 pub enum AudioServerError {
     #[error(transparent)]
@@ -24,6 +26,7 @@ pub enum AudioServerError {
 }
 
 pub async fn start_audio_server(
+    player_config: PlayerConfig,
     event_tx: async_broadcast::Sender<Event>,
 ) -> Result<Arc<Player>, AudioServerError> {
     let (mut init_tx, init_rx) = async_oneshot::oneshot();
@@ -39,6 +42,7 @@ pub async fn start_audio_server(
 
         let (guard_tx, guard_rx) = channel::bounded(1);
         let player = Arc::new(Player::connect_new(
+            player_config,
             event_tx,
             output_stream.mixer(),
             guard_tx,

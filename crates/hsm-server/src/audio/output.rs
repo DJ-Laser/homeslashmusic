@@ -32,8 +32,8 @@ impl SourceQueueState {
         !matches!(self, Self::None)
     }
 
-    /// Invalidate any queued source
-    /// Used by Player to change the queued source
+    /// Invalidate any queued source.
+    /// Used by Player to change the queued source.
     pub fn invalidate(&mut self) {
         match self {
             Self::Queued(_) => *self = Self::Playing,
@@ -41,8 +41,8 @@ impl SourceQueueState {
         }
     }
 
-    /// Consume the queued source
-    /// Used by the audio thread to load a new source
+    /// Consume the queued source.
+    /// Used by the audio thread to load a new source.
     pub fn consume(&mut self) -> Option<Box<dyn Source + Send>> {
         match self {
             Self::Queued(_) => {

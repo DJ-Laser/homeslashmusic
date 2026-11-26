@@ -141,6 +141,37 @@ impl Controls {
 }
 
 #[derive(Debug)]
+pub struct TrackGainFactors(AtomicU64);
+
+impl TrackGainFactors {
+    pub fn encode(factor: f32, max_factor: f32) -> u64 {
+        let lo = u64::from(factor.to_bits());
+        let hi = u64::from(max_factor.to_bits());
+        lo | (hi << 32)
+    }
+
+    pub fn decode(val: u64) -> (f32, f32) {
+        #[expect(clippy::cast_possible_truncation, reason = "Get lower 32 bits")]
+        let factor = f32::from_bits(val as u32);
+        let max_factor = f32::from_bits((val >> 32) as u32);
+        (factor, max_factor)
+    }
+
+    pub fn new(factor: f32, max_factor: f32) -> Self {
+        Self(AtomicU64::new(Self::encode(factor, max_factor)))
+    }
+
+    pub fn set(&self, factor: f32, max_factor: f32) {
+        self.0
+            .store(Self::encode(factor, max_factor), Ordering::Release);
+    }
+
+    pub fn get(&self) -> (f32, f32) {
+        Self::decode(self.0.load(Ordering::Acquire))
+    }
+}
+
+#[derive(Debug)]
 pub enum SourceEvent {
     Seeked(Duration),
     LoopError(RodioSeekError),
@@ -165,6 +196,7 @@ struct ControlledSource<I> {
     input: ControlledSourceInner<I>,
     controls: Arc<Controls>,
     source_tx: Sender<SourceEvent>,
+    gain_factors: Arc<TrackGainFactors>,
 
     should_skip: bool,
     cached_loop_mode: LoopMode,
@@ -175,11 +207,17 @@ impl<I> ControlledSource<I>
 where
     I: Source,
 {
-    pub fn new(input: I, controls: Arc<Controls>, source_tx: Sender<SourceEvent>) -> Self {
+    pub fn new(
+        input: I,
+        controls: Arc<Controls>,
+        source_tx: Sender<SourceEvent>,
+        gain_factors: Arc<TrackGainFactors>,
+    ) -> Self {
         Self {
             input: input.track_position().amplify(1.0).pausable(false),
             controls,
             source_tx,
+            gain_factors,
 
             should_skip: false,
             cached_loop_mode: LoopMode::None,
@@ -200,7 +238,11 @@ where
         pausable.set_paused(matches!(controls.playback_state(), PlaybackState::Paused));
 
         let volume_controlled = pausable.inner_mut();
-        volume_controlled.set_factor(controls.volume());
+        volume_controlled.set_factor({
+            let volume_factor = f32::powi(controls.volume(), 3);
+            let (gain_factor, max_factor) = self.gain_factors.get();
+            f32::min(volume_factor * gain_factor, max_factor)
+        });
 
         let position_tracked = volume_controlled.inner_mut();
         if let Some((seek_position, mut tx)) = controls.take_seek() {
@@ -319,8 +361,9 @@ pub fn wrap_source<S: Source>(
     source: S,
     controls: Arc<Controls>,
     source_tx: Sender<SourceEvent>,
+    gain_factors: Arc<TrackGainFactors>,
 ) -> impl Source {
-    ControlledSource::new(source, controls, source_tx).periodic_access(
+    ControlledSource::new(source, controls, source_tx, gain_factors).periodic_access(
         SOURCE_UPDATE_INTERVAL,
         ControlledSource::update_control_state,
     )

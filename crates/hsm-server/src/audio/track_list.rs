@@ -1,7 +1,7 @@
 use std::{
     ops::Index,
     sync::{
-        Mutex,
+        Arc, Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
 };
@@ -9,7 +9,10 @@ use std::{
 use hsm_ipc::{InsertPosition, QueuedTrack, QueuedTrackId, QueuedTrackMetadata};
 use rand::{Rng, seq::SliceRandom};
 
-use crate::database::{ReplayGain, TrackLocation};
+use crate::{
+    audio::controlled_source::TrackGainFactors,
+    database::{ReplayGain, TrackLocation},
+};
 
 use super::PlayerError;
 
@@ -21,12 +24,31 @@ pub struct InsertTrackData {
 }
 
 impl InsertTrackData {
+    pub fn with_gain(self, gain_factors: Arc<TrackGainFactors>) -> ProcessedInsertTrackData {
+        ProcessedInsertTrackData {
+            metadata: self.metadata,
+            location: self.location,
+            replay_gain: self.replay_gain,
+            gain_factors,
+        }
+    }
+}
+
+pub struct ProcessedInsertTrackData {
+    pub metadata: QueuedTrackMetadata,
+    pub location: TrackLocation,
+    pub replay_gain: ReplayGain,
+    pub gain_factors: Arc<TrackGainFactors>,
+}
+
+impl ProcessedInsertTrackData {
     fn with_id(self, id: QueuedTrackId) -> PlayerTrackData {
         PlayerTrackData {
             id,
             metadata: self.metadata,
             location: self.location,
             replay_gain: self.replay_gain,
+            gain_factors: self.gain_factors,
         }
     }
 }
@@ -37,6 +59,7 @@ pub struct PlayerTrackData {
     pub metadata: QueuedTrackMetadata,
     pub location: TrackLocation,
     pub replay_gain: ReplayGain,
+    pub gain_factors: Arc<TrackGainFactors>,
 }
 
 impl From<PlayerTrackData> for QueuedTrack {
@@ -48,10 +71,25 @@ impl From<PlayerTrackData> for QueuedTrack {
     }
 }
 
+impl PlayerTrackData {
+    fn clone_queue_data(&self) -> QueueTrackData {
+        QueueTrackData {
+            location: self.location.clone(),
+            gain_factors: self.gain_factors.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct QueueTrackData {
+    pub location: TrackLocation,
+    pub gain_factors: Arc<TrackGainFactors>,
+}
+
 /// `track_list` and `shuffle_order` must always have the same `len()`
 #[derive(Debug)]
 struct TrackListInner {
-    track_list: Vec<PlayerTrackData>,
+    pub track_list: Vec<PlayerTrackData>,
     shuffled_track_indicies: Vec<usize>,
     next_track_id: usize,
 }
@@ -84,7 +122,7 @@ impl TrackListInner {
     pub fn insert_tracks(
         &mut self,
         index: usize,
-        tracks: Vec<InsertTrackData>,
+        tracks: Vec<ProcessedInsertTrackData>,
     ) -> impl Iterator<Item = usize> {
         debug_assert_eq!(self.track_list.len(), self.shuffled_track_indicies.len());
 
@@ -203,7 +241,7 @@ impl TrackList {
     pub fn get_tracks_to_queue(
         &self,
         index: usize,
-    ) -> Option<(PlayerTrackData, Option<PlayerTrackData>)> {
+    ) -> Option<(QueueTrackData, Option<QueueTrackData>)> {
         let num_tracks = self.len.load(Ordering::Acquire);
 
         if index >= num_tracks {
@@ -212,13 +250,13 @@ impl TrackList {
 
         let inner = self.inner.lock().unwrap();
 
-        let current_track = inner[index].clone();
+        let current_track = inner[index].clone_queue_data();
 
         let is_last_track = index == num_tracks - 1;
         let next_track = if is_last_track {
             None
         } else {
-            Some(inner[index + 1].clone())
+            Some(inner[index + 1].clone_queue_data())
         };
 
         Some((current_track, next_track))
@@ -259,7 +297,7 @@ impl TrackList {
         &self,
         current_index: usize,
         position: InsertPosition,
-        tracks: Vec<InsertTrackData>,
+        tracks: Vec<ProcessedInsertTrackData>,
         set_as_current: bool,
     ) -> Result<(usize, Option<QueuedTrackId>), PlayerError> {
         let mut inner = self.inner.lock().unwrap();
@@ -341,5 +379,13 @@ impl TrackList {
         let inner = self.inner.lock().unwrap();
 
         inner.track_list.clone()
+    }
+
+    pub fn update_gain_factors(&self, mut calc: impl FnMut(&ReplayGain) -> (f32, f32)) {
+        let inner = self.inner.lock().unwrap();
+        for track in &inner.track_list {
+            let (factor, max_factor) = calc(&track.replay_gain);
+            track.gain_factors.set(factor, max_factor);
+        }
     }
 }

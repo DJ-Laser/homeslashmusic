@@ -24,27 +24,27 @@ fn default_database_path() -> PathBuf {
     )
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, KdlNode)]
+#[derive(Debug, Clone, PartialEq, KdlNode)]
 #[kdl(node = "local", rename_all = "kebab-case")]
 pub struct LocalSourceConfig {
     #[kdl(positional = 0)]
     pub path: PathBuf,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, KdlChoice)]
+#[derive(Debug, Clone, PartialEq, KdlChoice)]
 #[kdl(rename_all = "kebab-case")]
 pub enum SourceConfig {
     Local(LocalSourceConfig),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, KdlNode)]
+#[derive(Debug, Clone, PartialEq, KdlNode)]
 #[kdl(rename_all = "kebab-case")]
 pub struct ProviderConfig {
     #[kdl(children_any)]
     pub sources: Vec<SourceConfig>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, KdlNode)]
+#[derive(Debug, Clone, PartialEq, KdlNode)]
 #[kdl(node = "database", rename_all = "kebab-case")]
 pub struct DatabaseConfig {
     #[kdl(value, name = "path", default_fn = "default_database_path")]

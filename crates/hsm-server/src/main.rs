@@ -71,7 +71,7 @@ async fn run_servers(executor: Arc<Executor<'static>>) -> Result<(), MainError> 
     let (mut event_tx, event_rx) = async_broadcast::broadcast(128);
     event_tx.set_overflow(true);
 
-    let player = start_audio_server(event_tx).await?;
+    let player = start_audio_server(config.player, event_tx).await?;
     let (database, database_autosaver) =
         database::load_or_init_database(&executor, config.database).await?;
 
