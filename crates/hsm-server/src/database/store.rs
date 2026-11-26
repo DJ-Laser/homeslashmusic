@@ -254,7 +254,7 @@ impl DatabaseStore {
             for err in &errors {
                 error!("Database integrity violation: {err}");
             }
-            panic!(
+            error!(
                 "DatabaseStore integrity check failed ({} errors)",
                 errors.len()
             );
