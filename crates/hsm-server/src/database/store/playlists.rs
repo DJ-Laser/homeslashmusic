@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use slotmap::DenseSlotMap;
 
 use crate::database::{
-    sources::PlaylistLocation,
+    sources::{PlaylistLocation, ProviderId},
     store::{
         AlbumData, AlbumId, DatabaseStore, Lookup, MissingDatabaseId, SongData, SongId, TrackData,
         TrackGroupData, TrackGroupId, TrackId,
@@ -54,6 +54,8 @@ impl DerivedPlaylistData {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlaylistData {
+    /// The name of the this playlist's provider
+    pub provider: ProviderId,
     /// The location of this playlist
     pub location: PlaylistLocation,
     /// All entries in the playlist, sorted by play order
@@ -202,6 +204,22 @@ impl DatabaseStore {
         );
 
         id
+    }
+
+    pub fn remove_playlist(&mut self, id: PlaylistId) {
+        Self::update_playlist_links(
+            &mut self.tracks,
+            &mut self.track_groups,
+            &mut self.songs,
+            &mut self.albums,
+            &mut self.playlists,
+            id,
+            true,
+        );
+
+        if let Some(playlist) = self.playlists.remove(id) {
+            self.lookup.playlist.remove(&playlist.location);
+        }
     }
 }
 

@@ -221,6 +221,16 @@ impl DatabaseStore {
 
         id
     }
+
+    pub fn remove_song(&mut self, id: SongId) {
+        Self::update_song_relationship_links(&mut self.songs, id, true);
+
+        if let Some(song) = self.songs.remove(id) {
+            self.lookup.song.remove(&song.mbid);
+
+            Self::update_song_links(&mut self.artists, id, &song, true);
+        }
+    }
 }
 
 impl Lookup {

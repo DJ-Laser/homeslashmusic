@@ -169,6 +169,20 @@ impl DatabaseStore {
 
         id
     }
+
+    pub fn remove_track_group(&mut self, id: TrackGroupId) {
+        if let Some(track_group) = self.track_groups.remove(id) {
+            self.lookup.track_group.remove(&track_group.location);
+
+            Self::update_track_group_links(
+                &mut self.albums,
+                &mut self.artists,
+                id,
+                &track_group,
+                true,
+            );
+        }
+    }
 }
 
 impl Lookup {

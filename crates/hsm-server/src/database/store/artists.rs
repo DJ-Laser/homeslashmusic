@@ -147,6 +147,18 @@ impl DatabaseStore {
 
         id
     }
+
+    pub fn remove_artist(&mut self, id: ArtistId) {
+        if let Some(artist) = self.artists.remove(id) {
+            if let Some(mbid) = artist.mbid {
+                self.lookup.artist_by_mbid.remove(&mbid);
+            }
+
+            for location in artist.locations {
+                self.lookup.artist_by_location.remove(&location);
+            }
+        }
+    }
 }
 
 impl Lookup {

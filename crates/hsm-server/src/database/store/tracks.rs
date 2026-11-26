@@ -231,6 +231,21 @@ impl DatabaseStore {
 
         id
     }
+
+    pub fn remove_track(&mut self, id: TrackId) {
+        if let Some(track) = self.tracks.remove(id) {
+            self.lookup.track.remove(&track.location);
+
+            Self::update_track_links(
+                &mut self.songs,
+                &mut self.track_groups,
+                &mut self.artists,
+                id,
+                &track,
+                true,
+            );
+        }
+    }
 }
 
 impl Lookup {

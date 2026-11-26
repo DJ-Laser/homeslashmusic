@@ -135,6 +135,14 @@ impl DatabaseStore {
 
         id
     }
+
+    pub fn remove_album(&mut self, id: AlbumId) {
+        if let Some(album) = self.albums.remove(id) {
+            self.lookup.album.remove(&album.mbid);
+
+            Self::update_album_links(&mut self.artists, id, &album, true);
+        }
+    }
 }
 
 impl Lookup {

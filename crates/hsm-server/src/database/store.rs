@@ -26,7 +26,7 @@ pub use track_groups::*;
 pub use tracks::*;
 
 use crate::database::sources::{
-    ArtistLocation, PlaylistLocation, TrackGroupLocation, TrackLocation, UpdateState,
+    ArtistLocation, PlaylistLocation, ProviderId, TrackGroupLocation, TrackLocation, UpdateState,
 };
 
 #[derive(Error, Debug)]
@@ -245,10 +245,68 @@ impl DatabaseStore {
         println!();
     }
 
-    pub fn purge_post_update(&mut self, state: &UpdateState) {
-        let _ = state;
-        let _ = self;
-        //TODO
+    pub fn purge_orphaned_entities(&mut self) {
+        // Remove songs in a loop to catch long relationship chains
+        loop {
+            let remove_songs: Vec<_> = self
+                .songs
+                .iter()
+                .filter_map(|(id, song)| {
+                    if song.derived.tracks.is_empty()
+                        && song.derived.in_playlists.is_empty()
+                        && song.derived.related_to.is_empty()
+                    {
+                        return Some(id);
+                    }
+
+                    None
+                })
+                .collect();
+
+            if remove_songs.is_empty() {
+                break;
+            }
+
+            for id in remove_songs {
+                self.remove_song(id);
+            }
+        }
+
+        let remove_albums: Vec<_> = self
+            .albums
+            .iter()
+            .filter_map(|(id, album)| {
+                if album.derived.track_groups.is_empty() && album.derived.in_playlists.is_empty() {
+                    return Some(id);
+                }
+
+                None
+            })
+            .collect();
+
+        for id in remove_albums {
+            self.remove_album(id);
+        }
+
+        let remove_artists: Vec<_> = self
+            .artists
+            .iter()
+            .filter_map(|(id, artist)| {
+                if artist.derived.tracks.is_empty()
+                    && artist.derived.track_groups.is_empty()
+                    && artist.derived.songs.is_empty()
+                    && artist.derived.albums.is_empty()
+                {
+                    return Some(id);
+                }
+
+                None
+            })
+            .collect();
+
+        for id in remove_artists {
+            self.remove_artist(id);
+        }
 
         if let Err(errors) = self.verify_integrity() {
             for err in &errors {
@@ -259,6 +317,80 @@ impl DatabaseStore {
                 errors.len()
             );
         }
+    }
+
+    pub fn purge_post_update(&mut self, state: &UpdateState) {
+        let provider_excluded = |provider: &ProviderId| {
+            if let Some(ref updated_providers) = state.updated_providers
+                && !updated_providers.contains(provider)
+            {
+                return true;
+            }
+
+            state.failed_providers.contains(provider)
+        };
+
+        let remove_playlists: Vec<_> = self
+            .playlists
+            .iter()
+            .filter_map(|(id, playlist)| {
+                if provider_excluded(&playlist.provider) {
+                    return None;
+                }
+
+                if !state.seen_playlists.contains_key(&playlist.location) {
+                    return Some(id);
+                }
+
+                None
+            })
+            .collect();
+
+        for id in remove_playlists {
+            self.remove_playlist(id);
+        }
+
+        let remove_tracks: Vec<_> = self
+            .tracks
+            .iter()
+            .filter_map(|(id, track)| {
+                if provider_excluded(&track.provider) {
+                    return None;
+                }
+
+                if !state.seen_tracks.contains_key(&track.location) {
+                    return Some(id);
+                }
+
+                None
+            })
+            .collect();
+
+        for id in remove_tracks {
+            self.remove_track(id);
+        }
+
+        let remove_track_groups: Vec<_> = self
+            .track_groups
+            .iter()
+            .filter_map(|(id, track_group)| {
+                if provider_excluded(&track_group.provider) {
+                    return None;
+                }
+
+                if !state.seen_track_groups.contains_key(&track_group.location) {
+                    return Some(id);
+                }
+
+                None
+            })
+            .collect();
+
+        for id in remove_track_groups {
+            self.remove_track_group(id);
+        }
+
+        self.purge_orphaned_entities();
     }
 }
 
