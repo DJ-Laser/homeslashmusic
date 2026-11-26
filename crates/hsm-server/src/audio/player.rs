@@ -8,7 +8,7 @@ use std::{
 
 use float_cmp::approx_eq;
 use hsm_ipc::{
-    Event, InsertPosition, LoopMode, PlaybackState, QueuedTrackId, QueuedTrackMetadata, SeekOffset,
+    Event, InsertPosition, LoopMode, PlaybackState, QueuedTrack, QueuedTrackId, SeekOffset,
     SeekPosition,
 };
 use log::{debug, error};
@@ -18,10 +18,11 @@ use thiserror::Error;
 
 use crate::{
     audio::{
+        InsertTrackData,
         controlled_source::{self, Controls, SeekError, SourceEvent, wrap_source},
         decoder::{LoadTrackError, TrackDecoder},
         output::{PlayerAudioOutput, SourceQueue, SourceQueueState},
-        track_list::{ArcTrackInstance, TrackList},
+        track_list::TrackList,
     },
     database::TrackLocation,
 };
@@ -190,11 +191,11 @@ impl Player {
         };
 
         if load_necessary {
-            self.queue_track(current_track.loader.clone(), true).await;
+            self.queue_track(current_track.location.clone(), true).await;
         }
 
         if let Some(next_track) = next_track {
-            self.queue_track(next_track.loader.clone(), false).await;
+            self.queue_track(next_track.location.clone(), false).await;
         }
 
         true
@@ -253,9 +254,15 @@ impl Player {
         self.controls.reset_position();
     }
 
-    pub fn current_track(&self) -> Option<ArcTrackInstance> {
+    pub fn current_track_id(&self) -> Option<QueuedTrackId> {
+        self.tracks
+            .get_track_id_at(self.current_track_index.load(Ordering::Acquire))
+    }
+
+    pub fn current_track(&self) -> Option<QueuedTrack> {
         self.tracks
             .get_track_at(self.current_track_index.load(Ordering::Acquire))
+            .map(std::convert::Into::into)
     }
 
     pub async fn go_to_track(&self, track_id: QueuedTrackId) -> bool {
@@ -373,7 +380,7 @@ impl Player {
                 if let Some((_, Some(next_track))) =
                     self.tracks.get_tracks_to_queue(current_track_index)
                 {
-                    self.queue_track(next_track.loader.clone(), true).await;
+                    self.queue_track(next_track.location.clone(), true).await;
                 }
             }
         }
@@ -445,8 +452,13 @@ impl Player {
         }
     }
 
-    pub fn get_tracks(&self) -> Vec<ArcTrackInstance> {
-        self.tracks.get_tracks()
+    pub fn get_track_ids(&self) -> Vec<QueuedTrackId> {
+        self.tracks.get_track_ids()
+    }
+
+    pub fn get_tracks(&self) -> Vec<QueuedTrack> {
+        self.tracks.get_tracks();
+        todo!()
     }
 
     pub fn clear_tracks(&self) {
@@ -460,7 +472,7 @@ impl Player {
     pub async fn insert_tracks(
         &self,
         position: InsertPosition,
-        tracks: Vec<(TrackLocation, Arc<QueuedTrackMetadata>)>,
+        tracks: Vec<InsertTrackData>,
         set_as_current: bool,
     ) -> Result<Option<QueuedTrackId>, PlayerError> {
         let current_index = self.current_track_index.load(Ordering::Acquire);

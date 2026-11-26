@@ -1,7 +1,7 @@
 use std::{
     ops::Index,
     sync::{
-        Arc, Mutex,
+        Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
 };
@@ -9,23 +9,41 @@ use std::{
 use hsm_ipc::{InsertPosition, QueuedTrack, QueuedTrackId, QueuedTrackMetadata};
 use rand::{Rng, seq::SliceRandom};
 
-use crate::database::TrackLocation;
+use crate::database::{ReplayGain, TrackLocation};
 
 use super::PlayerError;
 
-/// A `LoadedTrack` with a `track_id` to uniquely identify it
 #[derive(Debug, Clone)]
-pub struct ArcTrackInstance {
-    pub id: QueuedTrackId,
-    pub loader: TrackLocation,
-    pub metadata: Arc<QueuedTrackMetadata>,
+pub struct InsertTrackData {
+    pub metadata: QueuedTrackMetadata,
+    pub location: TrackLocation,
+    pub replay_gain: ReplayGain,
 }
 
-impl ArcTrackInstance {
-    pub fn clone_owned_instance(&self) -> QueuedTrack {
+impl InsertTrackData {
+    fn with_id(self, id: QueuedTrackId) -> PlayerTrackData {
+        PlayerTrackData {
+            id,
+            metadata: self.metadata,
+            location: self.location,
+            replay_gain: self.replay_gain,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PlayerTrackData {
+    pub id: QueuedTrackId,
+    pub metadata: QueuedTrackMetadata,
+    pub location: TrackLocation,
+    pub replay_gain: ReplayGain,
+}
+
+impl From<PlayerTrackData> for QueuedTrack {
+    fn from(val: PlayerTrackData) -> Self {
         QueuedTrack {
-            id: self.id,
-            metadata: QueuedTrackMetadata::clone(&self.metadata),
+            id: val.id,
+            metadata: val.metadata,
         }
     }
 }
@@ -33,9 +51,9 @@ impl ArcTrackInstance {
 /// `track_list` and `shuffle_order` must always have the same `len()`
 #[derive(Debug)]
 struct TrackListInner {
-    track_list: Vec<ArcTrackInstance>,
+    track_list: Vec<PlayerTrackData>,
     shuffled_track_indicies: Vec<usize>,
-    latest_track_id: usize,
+    next_track_id: usize,
 }
 
 impl TrackListInner {
@@ -43,7 +61,7 @@ impl TrackListInner {
         Self {
             track_list: Vec::new(),
             shuffled_track_indicies: Vec::new(),
-            latest_track_id: 0,
+            next_track_id: 0,
         }
     }
 
@@ -66,21 +84,16 @@ impl TrackListInner {
     pub fn insert_tracks(
         &mut self,
         index: usize,
-        tracks: Vec<(TrackLocation, Arc<QueuedTrackMetadata>)>,
+        tracks: Vec<InsertTrackData>,
     ) -> impl Iterator<Item = usize> {
         debug_assert_eq!(self.track_list.len(), self.shuffled_track_indicies.len());
 
         let num_tracks = tracks.len();
         let track_instances = tracks.into_iter().map(|track| {
-            let (location, metadata) = track;
-            let track_instance = ArcTrackInstance {
-                loader: location,
-                metadata: metadata.clone(),
-                id: QueuedTrackId(self.latest_track_id),
-            };
+            let track = track.with_id(QueuedTrackId(self.next_track_id));
 
-            self.latest_track_id += 1;
-            track_instance
+            self.next_track_id += 1;
+            track
         });
 
         self.track_list.splice(index..index, track_instances);
@@ -127,7 +140,7 @@ impl TrackListInner {
 }
 
 impl Index<usize> for TrackListInner {
-    type Output = ArcTrackInstance;
+    type Output = PlayerTrackData;
 
     fn index(&self, index: usize) -> &Self::Output {
         debug_assert_eq!(self.track_list.len(), self.shuffled_track_indicies.len());
@@ -164,7 +177,18 @@ impl TrackList {
         (0..inner.len()).find(|&index| inner[index].id == track_id)
     }
 
-    pub fn get_track_at(&self, index: usize) -> Option<ArcTrackInstance> {
+    pub fn get_track_id_at(&self, index: usize) -> Option<QueuedTrackId> {
+        let num_tracks = self.len.load(Ordering::Acquire);
+
+        if index >= num_tracks {
+            return None;
+        }
+
+        let inner = self.inner.lock().unwrap();
+        Some(inner[index].id)
+    }
+
+    pub fn get_track_at(&self, index: usize) -> Option<PlayerTrackData> {
         let num_tracks = self.len.load(Ordering::Acquire);
 
         if index >= num_tracks {
@@ -179,7 +203,7 @@ impl TrackList {
     pub fn get_tracks_to_queue(
         &self,
         index: usize,
-    ) -> Option<(ArcTrackInstance, Option<ArcTrackInstance>)> {
+    ) -> Option<(PlayerTrackData, Option<PlayerTrackData>)> {
         let num_tracks = self.len.load(Ordering::Acquire);
 
         if index >= num_tracks {
@@ -235,7 +259,7 @@ impl TrackList {
         &self,
         current_index: usize,
         position: InsertPosition,
-        tracks: Vec<(TrackLocation, Arc<QueuedTrackMetadata>)>,
+        tracks: Vec<InsertTrackData>,
         set_as_current: bool,
     ) -> Result<(usize, Option<QueuedTrackId>), PlayerError> {
         let mut inner = self.inner.lock().unwrap();
@@ -307,7 +331,13 @@ impl TrackList {
         }
     }
 
-    pub fn get_tracks(&self) -> Vec<ArcTrackInstance> {
+    pub fn get_track_ids(&self) -> Vec<QueuedTrackId> {
+        let inner = self.inner.lock().unwrap();
+
+        inner.track_list.iter().map(|track| track.id).collect()
+    }
+
+    pub fn get_tracks(&self) -> Vec<PlayerTrackData> {
         let inner = self.inner.lock().unwrap();
 
         inner.track_list.clone()

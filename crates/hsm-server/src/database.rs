@@ -25,6 +25,7 @@ use crate::{
 
 pub use persistence::LoadDbError;
 pub use sources::TrackLocation;
+pub use store::ReplayGain;
 
 #[derive(Debug, Error)]
 pub enum ReloadConfigError {

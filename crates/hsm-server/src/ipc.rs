@@ -158,7 +158,6 @@ impl RequestHandler for AppHandle {
         _request: requests::GetCurrentQueuedTrack,
     ) -> Result<Option<QueuedTrack>, hsm_ipc::Error> {
         let current_track = self.player.current_track();
-        let current_track = current_track.map(|track| track.clone_owned_instance());
 
         Ok(current_track)
     }
@@ -167,8 +166,7 @@ impl RequestHandler for AppHandle {
         &self,
         _request: requests::GetCurrentQueuedTrackId,
     ) -> Result<Option<QueuedTrackId>, hsm_ipc::Error> {
-        let current_track = self.player.current_track();
-        let current_track_id = current_track.map(|track| track.id);
+        let current_track_id = self.player.current_track_id();
 
         Ok(current_track_id)
     }
@@ -267,8 +265,8 @@ impl RequestHandler for AppHandle {
         &self,
         requests::SeekTo(track_id, position): requests::SeekTo,
     ) -> Result<bool, hsm_ipc::Error> {
-        if let Some(track) = self.player.current_track()
-            && track.id == track_id
+        if let Some(current_track_id) = self.player.current_track_id()
+            && current_track_id == track_id
         {
             self.player.seek(SeekPosition::To(position)).await?;
 
@@ -283,10 +281,6 @@ impl RequestHandler for AppHandle {
         _request: requests::GetQueuedTracks,
     ) -> Result<Vec<QueuedTrack>, hsm_ipc::Error> {
         let tracks = self.player.get_tracks();
-        let tracks = tracks
-            .into_iter()
-            .map(|track| track.clone_owned_instance())
-            .collect();
 
         Ok(tracks)
     }

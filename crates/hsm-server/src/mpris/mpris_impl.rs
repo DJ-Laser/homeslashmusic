@@ -231,7 +231,7 @@ impl PlayerInterface for MprisImpl {
 
     async fn metadata(&self) -> fdo::Result<mpris_server::Metadata> {
         let metadata = match self.handle.player.current_track() {
-            Some(track) => generate_metadata(track.clone_owned_instance()),
+            Some(track) => generate_metadata(track),
             None => mpris_server::Metadata::builder()
                 .trackid(mpris_server::TrackId::NO_TRACK)
                 .build(),
@@ -305,7 +305,7 @@ impl TrackListInterface for MprisImpl {
                 |track_id| match tracks.iter().position(|track| track.id == track_id) {
                     Some(index) => {
                         let track = tracks.swap_remove(index);
-                        generate_metadata(track.clone_owned_instance())
+                        generate_metadata(track)
                     }
                     None => generate_empty_metadata(track_id),
                 },
@@ -343,11 +343,12 @@ impl TrackListInterface for MprisImpl {
     }
 
     async fn tracks(&self) -> fdo::Result<Vec<mpris_server::TrackId>> {
-        let track_ids = self.handle.player.get_tracks();
-
-        let track_ids = track_ids
+        let track_ids = self
+            .handle
+            .player
+            .get_track_ids()
             .into_iter()
-            .map(|track| into_dbus_track_id(track.id))
+            .map(into_dbus_track_id)
             .collect();
 
         Ok(track_ids)

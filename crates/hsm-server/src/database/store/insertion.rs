@@ -1,11 +1,9 @@
-use std::sync::Arc;
-
 use hsm_ipc::{InsertItem, QueuedTrackMetadata};
 use thiserror::Error;
 
-use crate::database::{
-    TrackLocation,
-    store::{AlbumId, DatabaseStore, MissingDatabaseId, SongId, TrackId},
+use crate::{
+    audio::InsertTrackData,
+    database::store::{AlbumId, DatabaseStore, MissingDatabaseId, SongId, TrackId},
 };
 
 #[derive(Debug, Error)]
@@ -21,10 +19,7 @@ pub enum InsertItemError {
 }
 
 impl DatabaseStore {
-    fn queue_metadata(
-        &self,
-        track_id: TrackId,
-    ) -> Result<(TrackLocation, Arc<QueuedTrackMetadata>), MissingDatabaseId> {
+    fn queue_metadata(&self, track_id: TrackId) -> Result<InsertTrackData, MissingDatabaseId> {
         let track = self.get_track(track_id)?;
 
         let track_group = track
@@ -47,9 +42,8 @@ impl DatabaseStore {
             |song| self.get_artists_text(song.artists_text.as_ref(), &song.artists),
         )?;
 
-        Ok((
-            track.location.clone(),
-            Arc::new(QueuedTrackMetadata {
+        Ok(InsertTrackData {
+            metadata: QueuedTrackMetadata {
                 track_id: track_id.into(),
                 length: track.length,
                 title: song
@@ -62,27 +56,29 @@ impl DatabaseStore {
                 artist_text,
                 date: song.and_then(|song| song.date.clone()),
                 genres: song.map_or_default(|song| song.genres.clone()),
-            }),
-        ))
+            },
+            location: track.location.clone(),
+            replay_gain: track.replay_gain.clone(),
+        })
     }
 
     pub fn queue_single_metadata(
         &self,
         track_id: TrackId,
-    ) -> Result<Vec<(TrackLocation, Arc<QueuedTrackMetadata>)>, MissingDatabaseId> {
+    ) -> Result<Vec<InsertTrackData>, MissingDatabaseId> {
         Ok(vec![self.queue_metadata(track_id)?])
     }
 
     pub fn queue_many_metadata(
         &self,
         track_ids: &[TrackId],
-    ) -> Result<Vec<(TrackLocation, Arc<QueuedTrackMetadata>)>, MissingDatabaseId> {
+    ) -> Result<Vec<InsertTrackData>, MissingDatabaseId> {
         let mut ret: Vec<_> = track_ids
             .iter()
             .map(|track_id| self.queue_metadata(*track_id))
             .collect::<Result<_, _>>()?;
 
-        ret.sort_by_key(|(_, data)| data.track_number);
+        ret.sort_by_key(|track| track.metadata.track_number);
 
         Ok(ret)
     }
@@ -90,7 +86,7 @@ impl DatabaseStore {
     pub fn queue_insertion(
         &self,
         item: &InsertItem,
-    ) -> Result<Vec<(TrackLocation, Arc<QueuedTrackMetadata>)>, InsertItemError> {
+    ) -> Result<Vec<InsertTrackData>, InsertItemError> {
         let tracks = match *item {
             InsertItem::Track(track_id) => self.queue_single_metadata(track_id.into())?,
             InsertItem::Song(song_id) => {

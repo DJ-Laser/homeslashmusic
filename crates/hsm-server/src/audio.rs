@@ -12,6 +12,7 @@ use smol::channel;
 use thiserror::Error;
 
 pub use player::{Player, PlayerError};
+pub use track_list::InsertTrackData;
 
 #[derive(Debug, Error)]
 pub enum AudioServerError {
