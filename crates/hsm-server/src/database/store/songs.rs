@@ -123,7 +123,7 @@ impl DatabaseStore {
         }
     }
 
-    fn update_song_relationship_links(
+    pub fn update_song_relationship_links(
         songs: &mut DenseSlotMap<SongId, SongData>,
         id: SongId,
         remove: bool,

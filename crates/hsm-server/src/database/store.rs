@@ -131,9 +131,15 @@ impl DatabaseStore {
             );
         }
 
+        let mut song_ids = Vec::with_capacity(self.songs.len());
         for (id, song) in &self.songs {
             self.lookup.insert_song(song.mbid, id);
             Self::update_song_links(&mut self.artists, id, song, false);
+            song_ids.push(id);
+        }
+
+        for id in song_ids {
+            Self::update_song_relationship_links(&mut self.songs, id, false);
         }
 
         for (id, album) in &self.albums {
@@ -197,7 +203,7 @@ impl DatabaseStore {
         println!();
         for (_, song) in &self.songs {
             println!(
-                "{} - {}, ({} related songs)",
+                "{} - {} ({} related songs)",
                 song.title,
                 song.artists_text.as_deref().unwrap_or("Unknown Artist"),
                 song.relationships.values().map(Vec::len).sum::<usize>()
@@ -209,7 +215,7 @@ impl DatabaseStore {
         println!();
         for (_, album) in &self.albums {
             println!(
-                "{} - {}, ({} track groups)",
+                "{} - {} ({} track groups)",
                 album.title,
                 album.artists_text.as_deref().unwrap_or("Unknown Artist"),
                 album.derived.track_groups.len()
@@ -221,7 +227,7 @@ impl DatabaseStore {
         println!();
         for (_, artist) in &self.artists {
             println!(
-                "{}, ({} songs and {} albums)",
+                "{} ({} songs and {} albums)",
                 artist.name,
                 artist.derived.songs.len(),
                 artist.derived.albums.len(),
@@ -231,16 +237,9 @@ impl DatabaseStore {
         println!();
         println!("##### INCOMPLETE MBIDS #####");
         println!();
-        for mbid in self.mbid_query_state.incomplete.keys() {
-            if self.mbid_query_state.pending.contains_key(mbid) {
-                println!("{mbid} (pending)");
-            } else {
-                println!("{mbid}");
-            }
-        }
-        for mbid in self.mbid_query_state.failed.keys() {
-            println!("{mbid} (failed)");
-        }
+        println!("{} incomplete", self.mbid_query_state.incomplete.len());
+        println!("{} pending", self.mbid_query_state.pending.len());
+        println!("{} failed", self.mbid_query_state.failed.len());
 
         println!();
     }
