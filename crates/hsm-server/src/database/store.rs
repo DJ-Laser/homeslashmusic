@@ -394,13 +394,12 @@ impl DatabaseStore {
 }
 
 mod integrity {
-    use crate::database::store::{DatabaseStore, MissingDatabaseId, PlaylistEntry};
+    use crate::database::store::{DatabaseStore, PlaylistEntry};
 
     #[derive(Debug, thiserror::Error)]
-    #[error("{entity} ({id}): {reason}")]
+    #[error("{entity}: {reason}")]
     pub struct IntegrityError {
         pub entity: &'static str,
-        pub id: MissingDatabaseId,
         pub reason: String,
     }
 
@@ -409,19 +408,17 @@ mod integrity {
         #[expect(clippy::too_many_lines, reason = "Test code")]
         pub fn verify_integrity(&self) -> Result<(), Vec<IntegrityError>> {
             let mut errors = Vec::new();
-
-            let mut push_err = |entity: &'static str, id: MissingDatabaseId, reason: String| {
-                errors.push(IntegrityError { entity, id, reason });
+            let mut push_err = |entity: &'static str, reason: String| {
+                errors.push(IntegrityError { entity, reason });
             };
 
-            // 1. Tracks -> Song, Artists, TrackGroup, in_playlists + lookup.track
+            // 1. Tracks -> Song, TrackGroup, Artists, in_playlists + lookup.track
             for (track_id, track) in &self.tracks {
                 if self.lookup.track.get(&track.location) != Some(&track_id) {
                     push_err(
                         "Track",
-                        MissingDatabaseId::Track(track_id),
                         format!(
-                            "missing or mismatched lookup.track entry for {}",
+                            "{track_id} has missing or mismatched lookup.track entry for location {}",
                             track.location
                         ),
                     );
@@ -431,14 +428,12 @@ mod integrity {
                     match self.songs.get(song_id) {
                         None => push_err(
                             "Track",
-                            MissingDatabaseId::Track(track_id),
-                            MissingDatabaseId::Song(song_id).to_string(),
+                            format!("{track_id} references missing Song {song_id} in track.song"),
                         ),
                         Some(song) if !song.derived.tracks.contains(&track_id) => push_err(
                             "Track",
-                            MissingDatabaseId::Track(track_id),
                             format!(
-                                "Song {song_id} does not list this track in song.derived.tracks"
+                                "{track_id} references Song {song_id} in track.song, but {song_id} does not list {track_id} in song.derived.tracks"
                             ),
                         ),
                         _ => {}
@@ -449,14 +444,14 @@ mod integrity {
                     match self.track_groups.get(group_id) {
                         None => push_err(
                             "Track",
-                            MissingDatabaseId::Track(track_id),
-                            MissingDatabaseId::TrackGroup(group_id).to_string(),
+                            format!(
+                                "{track_id} references missing TrackGroup {group_id} in track.track_group"
+                            ),
                         ),
                         Some(group) if !group.derived.tracks.contains(&track_id) => push_err(
                             "Track",
-                            MissingDatabaseId::Track(track_id),
                             format!(
-                                "TrackGroup {group_id} does not list this track in group.derived.tracks"
+                                "{track_id} references TrackGroup {group_id} in track.track_group, but {group_id} does not list {track_id} in track_group.derived.tracks"
                             ),
                         ),
                         _ => {}
@@ -467,14 +462,14 @@ mod integrity {
                     match self.artists.get(artist_id) {
                         None => push_err(
                             "Track",
-                            MissingDatabaseId::Track(track_id),
-                            MissingDatabaseId::Artist(artist_id).to_string(),
+                            format!(
+                                "{track_id} references missing Artist {artist_id} in track.artists"
+                            ),
                         ),
                         Some(artist) if !artist.derived.tracks.contains(&track_id) => push_err(
                             "Track",
-                            MissingDatabaseId::Track(track_id),
                             format!(
-                                "Artist {artist_id} does not list this track in artist.derived.tracks"
+                                "{track_id} references Artist {artist_id} in track.artists, but {artist_id} does not list {track_id} in artist.derived.tracks"
                             ),
                         ),
                         _ => {}
@@ -485,67 +480,58 @@ mod integrity {
                     match self.playlists.get(playlist_id) {
                         None => push_err(
                             "Track",
-                            MissingDatabaseId::Track(track_id),
-                            MissingDatabaseId::Playlist(playlist_id).to_string(),
+                            format!(
+                                "{track_id} references missing Playlist {playlist_id} in track.derived.in_playlists"
+                            ),
                         ),
                         Some(playlist)
                             if !playlist.entries.contains(&PlaylistEntry::Track(track_id)) =>
                         {
                             push_err(
                                 "Track",
-                                MissingDatabaseId::Track(track_id),
-                                format!("Playlist {playlist_id} does not contain Track {track_id}"),
+                                format!(
+                                    "{track_id} lists Playlist {playlist_id} in track.derived.in_playlists, but {playlist_id} does not contain {track_id} in playlist.entries"
+                                ),
                             );
                         }
                         _ => {}
                     }
                 }
             }
+
             for (location, &track_id) in &self.lookup.track {
                 if !self.tracks.contains_key(track_id) {
                     push_err(
                         "lookup.track",
-                        MissingDatabaseId::Track(track_id),
-                        format!("location {location} points to missing track"),
+                        format!("location {location} points to missing Track {track_id}"),
                     );
                 }
             }
 
-            // 2. TrackGroups -> Tracks, Album, Artists, in_playlists + lookup.track_group
+            // 2. TrackGroups -> Album, Artists, derived.tracks, in_playlists + lookup.track_group
             for (group_id, group) in &self.track_groups {
                 if self.lookup.track_group.get(&group.location) != Some(&group_id) {
                     push_err(
                         "TrackGroup",
-                        MissingDatabaseId::TrackGroup(group_id),
                         format!(
-                            "missing or mismatched lookup.track_group entry for {}",
+                            "{group_id} has missing or mismatched lookup.track_group entry for location {}",
                             group.location
                         ),
                     );
-                }
-
-                for &track_id in &group.derived.tracks {
-                    if !self.tracks.contains_key(track_id) {
-                        push_err(
-                            "TrackGroup",
-                            MissingDatabaseId::TrackGroup(group_id),
-                            MissingDatabaseId::Track(track_id).to_string(),
-                        );
-                    }
                 }
 
                 if let Some(album_id) = group.album {
                     match self.albums.get(album_id) {
                         None => push_err(
                             "TrackGroup",
-                            MissingDatabaseId::TrackGroup(group_id),
-                            MissingDatabaseId::Album(album_id).to_string(),
+                            format!(
+                                "{group_id} references missing Album {album_id} in track_group.album"
+                            ),
                         ),
                         Some(album) if !album.derived.track_groups.contains(&group_id) => push_err(
                             "TrackGroup",
-                            MissingDatabaseId::TrackGroup(group_id),
                             format!(
-                                "Album {album_id} does not list this group in album.derived.track_groups"
+                                "{group_id} references Album {album_id} in track_group.album, but {album_id} does not list {group_id} in album.derived.track_groups"
                             ),
                         ),
                         _ => {}
@@ -556,18 +542,36 @@ mod integrity {
                     match self.artists.get(artist_id) {
                         None => push_err(
                             "TrackGroup",
-                            MissingDatabaseId::TrackGroup(group_id),
-                            MissingDatabaseId::Artist(artist_id).to_string(),
+                            format!(
+                                "{group_id} references missing Artist {artist_id} in track_group.artists"
+                            ),
                         ),
                         Some(artist) if !artist.derived.track_groups.contains(&group_id) => {
                             push_err(
                                 "TrackGroup",
-                                MissingDatabaseId::TrackGroup(group_id),
                                 format!(
-                                    "Artist {artist_id} does not list this group in artist.derived.track_groups"
+                                    "{group_id} references Artist {artist_id} in track_group.artists, but {artist_id} does not list {group_id} in artist.derived.track_groups"
                                 ),
                             );
                         }
+                        _ => {}
+                    }
+                }
+
+                for &track_id in &group.derived.tracks {
+                    match self.tracks.get(track_id) {
+                        None => push_err(
+                            "TrackGroup",
+                            format!(
+                                "{group_id} references missing Track {track_id} in track_group.derived.tracks"
+                            ),
+                        ),
+                        Some(track) if track.track_group != Some(group_id) => push_err(
+                            "TrackGroup",
+                            format!(
+                                "{group_id} lists Track {track_id} in track_group.derived.tracks, but {track_id} does not reference {group_id} in track.track_group"
+                            ),
+                        ),
                         _ => {}
                     }
                 }
@@ -576,8 +580,9 @@ mod integrity {
                     match self.playlists.get(playlist_id) {
                         None => push_err(
                             "TrackGroup",
-                            MissingDatabaseId::TrackGroup(group_id),
-                            MissingDatabaseId::Playlist(playlist_id).to_string(),
+                            format!(
+                                "{group_id} references missing Playlist {playlist_id} in track_group.derived.in_playlists"
+                            ),
                         ),
                         Some(playlist)
                             if !playlist
@@ -586,9 +591,8 @@ mod integrity {
                         {
                             push_err(
                                 "TrackGroup",
-                                MissingDatabaseId::TrackGroup(group_id),
                                 format!(
-                                    "Playlist {playlist_id} does not contain TrackGroup {group_id}"
+                                    "{group_id} lists Playlist {playlist_id} in track_group.derived.in_playlists, but {playlist_id} does not contain {group_id} in playlist.entries"
                                 ),
                             );
                         }
@@ -596,109 +600,117 @@ mod integrity {
                     }
                 }
             }
+
             for (location, &group_id) in &self.lookup.track_group {
                 if !self.track_groups.contains_key(group_id) {
                     push_err(
                         "lookup.track_group",
-                        MissingDatabaseId::TrackGroup(group_id),
-                        format!("location {location} points to missing track group"),
+                        format!("location {location} points to missing TrackGroup {group_id}"),
                     );
                 }
             }
 
-            // 3. Songs -> Tracks, Artists, in_playlists, relationships, derived.related_to + lookup.song
+            // 3. Songs -> derived.tracks, Artists, in_playlists, relationships, derived.related_to + lookup.song
             for (song_id, song) in &self.songs {
                 // Relationship targets can be listed for metadata purposes without playable tracks
                 if song.derived.related_to.is_empty() && song.derived.tracks.is_empty() {
                     push_err(
                         "Song",
-                        MissingDatabaseId::Song(song_id),
-                        "orphaned song with empty song.derived.tracks".into(),
+                        format!(
+                            "{song_id} is orphaned with empty song.derived.tracks and empty song.derived.related_to"
+                        ),
                     );
                 }
 
                 if self.lookup.song.get(&song.mbid) != Some(&song_id) {
                     push_err(
                         "Song",
-                        MissingDatabaseId::Song(song_id),
                         format!(
-                            "missing or mismatched lookup.song entry for MBID {}",
+                            "{song_id} has missing or mismatched lookup.song entry for MBID {}",
                             song.mbid
                         ),
                     );
                 }
 
                 for &track_id in &song.derived.tracks {
-                    if !self.tracks.contains_key(track_id) {
-                        push_err(
-                            "Song",
-                            MissingDatabaseId::Song(song_id),
-                            MissingDatabaseId::Track(track_id).to_string(),
-                        );
-                    }
-                }
-
-                for &artist_id in &song.artists {
-                    match self.artists.get(artist_id) {
+                    match self.tracks.get(track_id) {
                         None => push_err(
                             "Song",
-                            MissingDatabaseId::Song(song_id),
-                            MissingDatabaseId::Artist(artist_id).to_string(),
-                        ),
-                        Some(artist) if !artist.derived.songs.contains(&song_id) => push_err(
-                            "Song",
-                            MissingDatabaseId::Song(song_id),
                             format!(
-                                "Artist {artist_id} does not list this song in artist.derived.songs"
+                                "{song_id} references missing Track {track_id} in song.derived.tracks"
+                            ),
+                        ),
+                        Some(track) if track.song != Some(song_id) => push_err(
+                            "Song",
+                            format!(
+                                "{song_id} lists Track {track_id} in song.derived.tracks, but {track_id} does not reference {song_id} in track.song"
                             ),
                         ),
                         _ => {}
                     }
                 }
-
+                for &artist_id in &song.artists {
+                    match self.artists.get(artist_id) {
+                        None => push_err(
+                            "Song",
+                            format!(
+                                "{song_id} references missing Artist {artist_id} in song.artists"
+                            ),
+                        ),
+                        Some(artist) if !artist.derived.songs.contains(&song_id) => push_err(
+                            "Song",
+                            format!(
+                                "{song_id} references Artist {artist_id} in song.artists, but {artist_id} does not list {song_id} in artist.derived.songs"
+                            ),
+                        ),
+                        _ => {}
+                    }
+                }
                 for &playlist_id in &song.derived.in_playlists {
                     match self.playlists.get(playlist_id) {
                         None => push_err(
                             "Song",
-                            MissingDatabaseId::Song(song_id),
-                            MissingDatabaseId::Playlist(playlist_id).to_string(),
+                            format!(
+                                "{song_id} references missing Playlist {playlist_id} in song.derived.in_playlists"
+                            ),
                         ),
                         Some(playlist)
                             if !playlist.entries.contains(&PlaylistEntry::Song(song_id)) =>
                         {
                             push_err(
                                 "Song",
-                                MissingDatabaseId::Song(song_id),
-                                format!("Playlist {playlist_id} does not contain Song {song_id}"),
+                                format!(
+                                    "{song_id} lists Playlist {playlist_id} in song.derived.in_playlists, but {playlist_id} does not contain {song_id} in playlist.entries"
+                                ),
                             );
                         }
                         _ => {}
                     }
                 }
-
                 for (kind, targets) in &song.relationships {
                     if targets.is_empty() {
                         push_err(
                             "Song",
-                            MissingDatabaseId::Song(song_id),
-                            format!("song.relationships contains empty list for {kind}"),
+                            format!(
+                                "{song_id} has empty target list in song.relationships[{kind}]"
+                            ),
                         );
                     }
-
                     for &target_id in targets {
                         if target_id == song_id {
                             push_err(
                                 "Song",
-                                MissingDatabaseId::Song(song_id),
-                                format!("self-referential {kind} relationship"),
+                                format!(
+                                    "{song_id} has self-referential {kind} entry in song.relationships"
+                                ),
                             );
                         }
-
                         match self.songs.get(target_id) {
                             None => push_err(
                                 "Song",
-                                MissingDatabaseId::Song(song_id),
-                                MissingDatabaseId::Song(target_id).to_string(),
+                                format!(
+                                    "{song_id} references missing target Song {target_id} in song.relationships[{kind}]"
+                                ),
                             ),
                             Some(target)
                                 if !target
@@ -709,9 +721,8 @@ mod integrity {
                             {
                                 push_err(
                                     "Song",
-                                    MissingDatabaseId::Song(song_id),
                                     format!(
-                                        "Song {target_id} does not list {song_id} in derived.related_to[{kind}]"
+                                        "{song_id} references Song {target_id} in song.relationships[{kind}], but {target_id} does not list {song_id} in song.derived.related_to[{kind}]"
                                     ),
                                 );
                             }
@@ -719,22 +730,22 @@ mod integrity {
                         }
                     }
                 }
-
                 for (kind, sources) in &song.derived.related_to {
                     if sources.is_empty() {
                         push_err(
                             "Song",
-                            MissingDatabaseId::Song(song_id),
-                            format!("song.derived.related_to contains empty list for {kind}"),
+                            format!(
+                                "{song_id} has empty source list in song.derived.related_to[{kind}]"
+                            ),
                         );
                     }
-
                     for &source_id in sources {
                         match self.songs.get(source_id) {
                             None => push_err(
                                 "Song",
-                                MissingDatabaseId::Song(song_id),
-                                MissingDatabaseId::Song(source_id).to_string(),
+                                format!(
+                                    "{song_id} references missing source Song {source_id} in song.derived.related_to[{kind}]"
+                                ),
                             ),
                             Some(source)
                                 if !source
@@ -744,9 +755,8 @@ mod integrity {
                             {
                                 push_err(
                                     "Song",
-                                    MissingDatabaseId::Song(song_id),
                                     format!(
-                                        "Song {source_id} does not list {song_id} in relationships[{kind}]"
+                                        "{song_id} lists Song {source_id} in song.derived.related_to[{kind}], but {source_id} does not list {song_id} in song.relationships[{kind}]"
                                     ),
                                 );
                             }
@@ -759,52 +769,58 @@ mod integrity {
                 if !self.songs.contains_key(song_id) {
                     push_err(
                         "lookup.song",
-                        MissingDatabaseId::Song(song_id),
-                        format!("MBID {mbid} points to missing song"),
+                        format!("MBID {mbid} points to missing Song {song_id}"),
                     );
                 }
             }
-
-            // 4. Albums -> TrackGroups, Artists, in_playlists + lookup.album
+            // 4. Albums -> derived.track_groups, Artists, in_playlists + lookup.album
             for (album_id, album) in &self.albums {
-                if album.derived.track_groups.is_empty() {
+                if album.derived.track_groups.is_empty() && album.derived.in_playlists.is_empty() {
                     push_err(
                         "Album",
-                        MissingDatabaseId::Album(album_id),
-                        "orphaned album with empty album.derived.track_groups".into(),
+                        format!(
+                            "{album_id} is orphaned with empty album.derived.track_groups and empty album.derived.in_playlists"
+                        ),
                     );
                 }
                 if self.lookup.album.get(&album.mbid) != Some(&album_id) {
                     push_err(
                         "Album",
-                        MissingDatabaseId::Album(album_id),
                         format!(
-                            "missing or mismatched lookup.album entry for MBID {}",
+                            "{album_id} has missing or mismatched lookup.album entry for MBID {}",
                             album.mbid
                         ),
                     );
                 }
                 for &group_id in &album.derived.track_groups {
-                    if !self.track_groups.contains_key(group_id) {
-                        push_err(
+                    match self.track_groups.get(group_id) {
+                        None => push_err(
                             "Album",
-                            MissingDatabaseId::Album(album_id),
-                            MissingDatabaseId::TrackGroup(group_id).to_string(),
-                        );
+                            format!(
+                                "{album_id} references missing TrackGroup {group_id} in album.derived.track_groups"
+                            ),
+                        ),
+                        Some(group) if group.album != Some(album_id) => push_err(
+                            "Album",
+                            format!(
+                                "{album_id} lists TrackGroup {group_id} in album.derived.track_groups, but {group_id} does not reference {album_id} in track_group.album"
+                            ),
+                        ),
+                        _ => {}
                     }
                 }
                 for &artist_id in &album.artists {
                     match self.artists.get(artist_id) {
                         None => push_err(
                             "Album",
-                            MissingDatabaseId::Album(album_id),
-                            MissingDatabaseId::Artist(artist_id).to_string(),
+                            format!(
+                                "{album_id} references missing Artist {artist_id} in album.artists"
+                            ),
                         ),
                         Some(artist) if !artist.derived.albums.contains(&album_id) => push_err(
                             "Album",
-                            MissingDatabaseId::Album(album_id),
                             format!(
-                                "Artist {artist_id} does not list this album in artist.derived.albums"
+                                "{album_id} references Artist {artist_id} in album.artists, but {artist_id} does not list {album_id} in artist.derived.albums"
                             ),
                         ),
                         _ => {}
@@ -814,16 +830,18 @@ mod integrity {
                     match self.playlists.get(playlist_id) {
                         None => push_err(
                             "Album",
-                            MissingDatabaseId::Album(album_id),
-                            MissingDatabaseId::Playlist(playlist_id).to_string(),
+                            format!(
+                                "{album_id} references missing Playlist {playlist_id} in album.derived.in_playlists"
+                            ),
                         ),
                         Some(playlist)
                             if !playlist.entries.contains(&PlaylistEntry::Album(album_id)) =>
                         {
                             push_err(
                                 "Album",
-                                MissingDatabaseId::Album(album_id),
-                                format!("Playlist {playlist_id} does not contain Album {album_id}"),
+                                format!(
+                                    "{album_id} lists Playlist {playlist_id} in album.derived.in_playlists, but {playlist_id} does not contain {album_id} in playlist.entries"
+                                ),
                             );
                         }
                         _ => {}
@@ -834,13 +852,11 @@ mod integrity {
                 if !self.albums.contains_key(album_id) {
                     push_err(
                         "lookup.album",
-                        MissingDatabaseId::Album(album_id),
-                        format!("MBID {mbid} points to missing album"),
+                        format!("MBID {mbid} points to missing Album {album_id}"),
                     );
                 }
             }
-
-            // 5. Artists -> derived.{tracks, track_groups, songs, albums} + lookup.artist_by_*
+            // 5. Artists -> derived.tracks, derived.track_groups, derived.songs, derived.albums + lookup.artist_*
             for (artist_id, artist) in &self.artists {
                 if artist.derived.tracks.is_empty()
                     && artist.derived.track_groups.is_empty()
@@ -849,55 +865,97 @@ mod integrity {
                 {
                     push_err(
                         "Artist",
-                        MissingDatabaseId::Artist(artist_id),
-                        "orphaned artist with no derived references".into(),
-                    );
-                }
-                if let Some(mbid) = &artist.mbid
-                    && self.lookup.artist_by_mbid.get(mbid) != Some(&artist_id)
-                {
-                    push_err(
-                        "Artist",
-                        MissingDatabaseId::Artist(artist_id),
                         format!(
-                            "missing or mismatched lookup.artist_by_mbid entry for MBID {mbid}"
+                            "{artist_id} is orphaned with no tracks, track_groups, songs, or albums"
                         ),
                     );
                 }
-                for &track_id in &artist.derived.tracks {
-                    if !self.tracks.contains_key(track_id) {
+                if let Some(mbid) = artist.mbid
+                    && self.lookup.artist_by_mbid.get(&mbid) != Some(&artist_id)
+                {
+                    push_err(
+                        "Artist",
+                        format!(
+                            "{artist_id} has missing or mismatched lookup.artist_by_mbid entry for MBID {mbid}"
+                        ),
+                    );
+                }
+                for location in &artist.locations {
+                    if self.lookup.artist_by_location.get(location) != Some(&artist_id) {
                         push_err(
                             "Artist",
-                            MissingDatabaseId::Artist(artist_id),
-                            MissingDatabaseId::Track(track_id).to_string(),
+                            format!(
+                                "{artist_id} has missing or mismatched lookup.artist_by_location entry for location {location}"
+                            ),
                         );
+                    }
+                }
+                for &track_id in &artist.derived.tracks {
+                    match self.tracks.get(track_id) {
+                        None => push_err(
+                            "Artist",
+                            format!(
+                                "{artist_id} references missing Track {track_id} in artist.derived.tracks"
+                            ),
+                        ),
+                        Some(track) if !track.artists.contains(&artist_id) => push_err(
+                            "Artist",
+                            format!(
+                                "{artist_id} lists Track {track_id} in artist.derived.tracks, but {track_id} does not list {artist_id} in track.artists"
+                            ),
+                        ),
+                        _ => {}
                     }
                 }
                 for &group_id in &artist.derived.track_groups {
-                    if !self.track_groups.contains_key(group_id) {
-                        push_err(
+                    match self.track_groups.get(group_id) {
+                        None => push_err(
                             "Artist",
-                            MissingDatabaseId::Artist(artist_id),
-                            MissingDatabaseId::TrackGroup(group_id).to_string(),
-                        );
+                            format!(
+                                "{artist_id} references missing TrackGroup {group_id} in artist.derived.track_groups"
+                            ),
+                        ),
+                        Some(group) if !group.artists.contains(&artist_id) => push_err(
+                            "Artist",
+                            format!(
+                                "{artist_id} lists TrackGroup {group_id} in artist.derived.track_groups, but {group_id} does not list {artist_id} in track_group.artists"
+                            ),
+                        ),
+                        _ => {}
                     }
                 }
                 for &song_id in &artist.derived.songs {
-                    if !self.songs.contains_key(song_id) {
-                        push_err(
+                    match self.songs.get(song_id) {
+                        None => push_err(
                             "Artist",
-                            MissingDatabaseId::Artist(artist_id),
-                            MissingDatabaseId::Song(song_id).to_string(),
-                        );
+                            format!(
+                                "{artist_id} references missing Song {song_id} in artist.derived.songs"
+                            ),
+                        ),
+                        Some(song) if !song.artists.contains(&artist_id) => push_err(
+                            "Artist",
+                            format!(
+                                "{artist_id} lists Song {song_id} in artist.derived.songs, but {song_id} does not list {artist_id} in song.artists"
+                            ),
+                        ),
+                        _ => {}
                     }
                 }
                 for &album_id in &artist.derived.albums {
-                    if !self.albums.contains_key(album_id) {
-                        push_err(
+                    match self.albums.get(album_id) {
+                        None => push_err(
                             "Artist",
-                            MissingDatabaseId::Artist(artist_id),
-                            MissingDatabaseId::Album(album_id).to_string(),
-                        );
+                            format!(
+                                "{artist_id} references missing Album {album_id} in artist.derived.albums"
+                            ),
+                        ),
+                        Some(album) if !album.artists.contains(&artist_id) => push_err(
+                            "Artist",
+                            format!(
+                                "{artist_id} lists Album {album_id} in artist.derived.albums, but {album_id} does not list {artist_id} in album.artists"
+                            ),
+                        ),
+                        _ => {}
                     }
                 }
             }
@@ -905,8 +963,7 @@ mod integrity {
                 if !self.artists.contains_key(artist_id) {
                     push_err(
                         "lookup.artist_by_mbid",
-                        MissingDatabaseId::Artist(artist_id),
-                        format!("MBID {mbid} points to missing artist"),
+                        format!("MBID {mbid} points to missing Artist {artist_id}"),
                     );
                 }
             }
@@ -914,61 +971,35 @@ mod integrity {
                 if !self.artists.contains_key(artist_id) {
                     push_err(
                         "lookup.artist_by_location",
-                        MissingDatabaseId::Artist(artist_id),
-                        format!("location {location} points to missing artist"),
+                        format!("location {location} points to missing Artist {artist_id}"),
                     );
                 }
             }
-
-            // 6. Playlists -> Entries + derived.in_playlists + lookup.playlist
+            // 6. Playlists -> entries, derived.in_playlists + lookup.playlist
             for (playlist_id, playlist) in &self.playlists {
                 if self.lookup.playlist.get(&playlist.location) != Some(&playlist_id) {
                     push_err(
                         "Playlist",
-                        MissingDatabaseId::Playlist(playlist_id),
                         format!(
-                            "missing or mismatched lookup.playlist entry for {}",
+                            "{playlist_id} has missing or mismatched lookup.playlist entry for location {}",
                             playlist.location
                         ),
                     );
-                }
-                for &parent_id in &playlist.derived.in_playlists {
-                    match self.playlists.get(parent_id) {
-                        None => push_err(
-                            "Playlist",
-                            MissingDatabaseId::Playlist(playlist_id),
-                            MissingDatabaseId::Playlist(parent_id).to_string(),
-                        ),
-                        Some(parent)
-                            if !parent
-                                .entries
-                                .contains(&PlaylistEntry::Playlist(playlist_id)) =>
-                        {
-                            push_err(
-                                "Playlist",
-                                MissingDatabaseId::Playlist(playlist_id),
-                                format!(
-                                    "Playlist {parent_id} does not contain Playlist {playlist_id}"
-                                ),
-                            );
-                        }
-                        _ => {}
-                    }
                 }
                 for entry in &playlist.entries {
                     match *entry {
                         PlaylistEntry::Track(track_id) => match self.tracks.get(track_id) {
                             None => push_err(
                                 "Playlist",
-                                MissingDatabaseId::Playlist(playlist_id),
-                                MissingDatabaseId::Track(track_id).to_string(),
+                                format!(
+                                    "{playlist_id} references missing Track {track_id} in playlist.entries"
+                                ),
                             ),
                             Some(track) if !track.derived.in_playlists.contains(&playlist_id) => {
                                 push_err(
                                     "Playlist",
-                                    MissingDatabaseId::Playlist(playlist_id),
                                     format!(
-                                        "Track {track_id} does not list this playlist in track.derived.in_playlists"
+                                        "{playlist_id} contains Track {track_id} in playlist.entries, but {track_id} does not list {playlist_id} in track.derived.in_playlists"
                                     ),
                                 );
                             }
@@ -978,17 +1009,17 @@ mod integrity {
                             match self.track_groups.get(group_id) {
                                 None => push_err(
                                     "Playlist",
-                                    MissingDatabaseId::Playlist(playlist_id),
-                                    MissingDatabaseId::TrackGroup(group_id).to_string(),
+                                    format!(
+                                        "{playlist_id} references missing TrackGroup {group_id} in playlist.entries"
+                                    ),
                                 ),
                                 Some(group)
                                     if !group.derived.in_playlists.contains(&playlist_id) =>
                                 {
                                     push_err(
                                         "Playlist",
-                                        MissingDatabaseId::Playlist(playlist_id),
                                         format!(
-                                            "TrackGroup {group_id} does not list this playlist in group.derived.in_playlists"
+                                            "{playlist_id} contains TrackGroup {group_id} in playlist.entries, but {group_id} does not list {playlist_id} in track_group.derived.in_playlists"
                                         ),
                                     );
                                 }
@@ -998,15 +1029,15 @@ mod integrity {
                         PlaylistEntry::Song(song_id) => match self.songs.get(song_id) {
                             None => push_err(
                                 "Playlist",
-                                MissingDatabaseId::Playlist(playlist_id),
-                                MissingDatabaseId::Song(song_id).to_string(),
+                                format!(
+                                    "{playlist_id} references missing Song {song_id} in playlist.entries"
+                                ),
                             ),
                             Some(song) if !song.derived.in_playlists.contains(&playlist_id) => {
                                 push_err(
                                     "Playlist",
-                                    MissingDatabaseId::Playlist(playlist_id),
                                     format!(
-                                        "Song {song_id} does not list this playlist in song.derived.in_playlists"
+                                        "{playlist_id} contains Song {song_id} in playlist.entries, but {song_id} does not list {playlist_id} in song.derived.in_playlists"
                                     ),
                                 );
                             }
@@ -1015,37 +1046,70 @@ mod integrity {
                         PlaylistEntry::Album(album_id) => match self.albums.get(album_id) {
                             None => push_err(
                                 "Playlist",
-                                MissingDatabaseId::Playlist(playlist_id),
-                                MissingDatabaseId::Album(album_id).to_string(),
+                                format!(
+                                    "{playlist_id} references missing Album {album_id} in playlist.entries"
+                                ),
                             ),
                             Some(album) if !album.derived.in_playlists.contains(&playlist_id) => {
                                 push_err(
                                     "Playlist",
-                                    MissingDatabaseId::Playlist(playlist_id),
                                     format!(
-                                        "Album {album_id} does not list this playlist in album.derived.in_playlists"
+                                        "{playlist_id} contains Album {album_id} in playlist.entries, but {album_id} does not list {playlist_id} in album.derived.in_playlists"
                                     ),
                                 );
                             }
                             _ => {}
                         },
-                        PlaylistEntry::Playlist(child_id) => match self.playlists.get(child_id) {
-                            None => push_err(
-                                "Playlist",
-                                MissingDatabaseId::Playlist(playlist_id),
-                                MissingDatabaseId::Playlist(child_id).to_string(),
-                            ),
-                            Some(child) if !child.derived.in_playlists.contains(&playlist_id) => {
+                        PlaylistEntry::Playlist(child_id) => {
+                            if child_id == playlist_id {
                                 push_err(
                                     "Playlist",
-                                    MissingDatabaseId::Playlist(playlist_id),
-                                    format!(
-                                        "Playlist {child_id} does not list this playlist in playlist.derived.in_playlists"
-                                    ),
+                                    format!("{playlist_id} references itself in playlist.entries"),
                                 );
                             }
-                            _ => {}
-                        },
+                            match self.playlists.get(child_id) {
+                                None => push_err(
+                                    "Playlist",
+                                    format!(
+                                        "{playlist_id} references missing child Playlist {child_id} in playlist.entries"
+                                    ),
+                                ),
+                                Some(child)
+                                    if !child.derived.in_playlists.contains(&playlist_id) =>
+                                {
+                                    push_err(
+                                        "Playlist",
+                                        format!(
+                                            "{playlist_id} contains Playlist {child_id} in playlist.entries, but {child_id} does not list {playlist_id} in playlist.derived.in_playlists"
+                                        ),
+                                    );
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                for &parent_id in &playlist.derived.in_playlists {
+                    match self.playlists.get(parent_id) {
+                        None => push_err(
+                            "Playlist",
+                            format!(
+                                "{playlist_id} references missing parent Playlist {parent_id} in playlist.derived.in_playlists"
+                            ),
+                        ),
+                        Some(parent)
+                            if !parent
+                                .entries
+                                .contains(&PlaylistEntry::Playlist(playlist_id)) =>
+                        {
+                            push_err(
+                                "Playlist",
+                                format!(
+                                    "{playlist_id} lists parent Playlist {parent_id} in playlist.derived.in_playlists, but {parent_id} does not contain {playlist_id} in playlist.entries"
+                                ),
+                            );
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -1053,12 +1117,10 @@ mod integrity {
                 if !self.playlists.contains_key(playlist_id) {
                     push_err(
                         "lookup.playlist",
-                        MissingDatabaseId::Playlist(playlist_id),
-                        format!("location {location} points to missing playlist"),
+                        format!("location {location} points to missing Playlist {playlist_id}"),
                     );
                 }
             }
-
             if errors.is_empty() {
                 Ok(())
             } else {
