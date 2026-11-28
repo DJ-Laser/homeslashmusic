@@ -1,6 +1,7 @@
 mod cli;
 mod commands;
 mod ipc;
+mod tui;
 
 use std::{io, path::PathBuf};
 
@@ -26,9 +27,18 @@ pub enum Error {
 
     #[error("Error when sending ipc request: {0}")]
     Server(#[from] hsm_ipc::Error),
+
+    #[error(transparent)]
+    Terminal(io::Error),
 }
 fn main() -> Result<(), crate::Error> {
     let command = Cli::parse();
 
-    handle_command(command)
+    if let Some(command) = command.command {
+        return handle_command(command);
+    }
+
+    ratatui::run(tui::app).map_err(Error::Terminal)?;
+
+    Ok(())
 }

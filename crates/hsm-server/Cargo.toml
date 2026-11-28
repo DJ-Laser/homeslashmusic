@@ -6,24 +6,15 @@ edition.workspace = true
 [dependencies]
 hsm-ipc.workspace = true
 
-clap.workspace = true
+log.workspace = true
 rand.workspace = true
+clap.workspace = true
 uuid.workspace = true
-dashmap.workspace = true
 slotmap.workspace = true
-arc-swap.workspace = true
 float-cmp.workspace = true
 thiserror.workspace = true
-directories.workspace = true
-nucleo-matcher.workspace = true
-
-log.workspace = true
 env_logger.workspace = true
-
-crc.workspace = true
-serde.workspace = true
-postcard.workspace = true
-kdl-config.workspace = true
+directories.workspace = true
 
 smol.workspace = true
 async-signal.workspace = true
@@ -31,14 +22,19 @@ async-oneshot.workspace = true
 async-broadcast.workspace = true
 futures-concurrency.workspace = true
 
+crc.workspace = true
+serde.workspace = true
+postcard.workspace = true
+kdl-config.workspace = true
+
 lofty.workspace = true
 rodio.workspace = true
-symphonia.workspace = true
-
 governor.workspace = true
+symphonia.workspace = true
 urlencoding.workspace = true
 mpris-server.workspace = true
 musicbrainz_rs.workspace = true
+nucleo-matcher.workspace = true
 
 [build-dependencies]
 clap.workspace = true

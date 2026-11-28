@@ -6,7 +6,7 @@ use hsm_ipc::SeekPosition;
 #[derive(Debug, Parser)]
 pub struct Cli {
     #[command(subcommand)]
-    pub command: Command,
+    pub command: Option<Command>,
 }
 
 #[derive(Debug, Subcommand)]

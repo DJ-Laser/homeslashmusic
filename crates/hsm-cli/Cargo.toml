@@ -11,8 +11,9 @@ path = "src/main.rs"
 hsm-ipc.workspace = true
 
 clap.workspace = true
+ratatui.workspace = true
+crossterm.workspace = true
 thiserror.workspace = true
-serde_json.workspace = true
 
 [build-dependencies]
 hsm-ipc.workspace = true

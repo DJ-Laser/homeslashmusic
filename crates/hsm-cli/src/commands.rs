@@ -1,4 +1,4 @@
-use crate::cli::{Cli, Command, QueueCommand, SearchQuery};
+use crate::cli::{Command, QueueCommand, SearchQuery};
 use crate::ipc::send_request;
 use hsm_ipc::{InsertPosition, LoopMode, QueuedTrack, SeekOffset, requests};
 
@@ -54,8 +54,8 @@ fn print_queue() -> Result<(), crate::Error> {
     Ok(())
 }
 
-pub fn handle_command(command: Cli) -> Result<(), crate::Error> {
-    match command.command {
+pub fn handle_command(command: Command) -> Result<(), crate::Error> {
+    match command {
         Command::Play { query } => {
             if let Some(query) = query {
                 send_request(requests::ClearQueue)?;
